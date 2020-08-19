@@ -9,7 +9,6 @@
 
 import os
 import glob
-import shutil
 import errno
 import numpy as np
 from scipy.ndimage import map_coordinates
@@ -40,7 +39,7 @@ def check_loaded_dataset(work_dir='./', print_msg=True):
                 stack_file  :
                 geom_file   :
                 lookup_file :
-    Example:    work_dir = os.path.expandvars('$SCRATCHDIR/SinabungT495F50AlosA/mintpy')
+    Example:    work_dir = os.path.expandvars('./FernandinaSenDT128/mintpy')
                 ut.check_loaded_dataset(work_dir)
     """
     load_complete = True

@@ -19,6 +19,9 @@ from mintpy.objects import ifgramStack, sensor
 from mintpy.utils import ptime, readfile
 
 
+SPEED_OF_LIGHT = 299792458   # m/s, speed of light
+
+
 ##################################################################
 BASELINE_LIST_FILE = """
 # Date  Bperp    dop0/PRF  dop1/PRF   dop2/PRF   PRF    slcDir
@@ -194,22 +197,19 @@ def igram_perp_baseline_list(fname):
     return p_baseline_list
 
 
-def critical_perp_baseline(sensor_name, inc_angle=None, print_msg=False):
+def critical_perp_baseline(sensor_name, inc_angle, print_msg=False):
     """Critical Perpendicular Baseline for each satellite"""
     # Jers: 5.712e3 m (near_range=688849.0551m)
     # Alos: 6.331e3 m (near_range=842663.2917m)
     # Tsx : 8.053e3 m (near_range=634509.1271m)
-
-    c = 299792458   # m/s, speed of light
-    wvl = sensor.wavelength(sensor_name)
-    # Yunjun 5/2016, case for Jers, need a automatic way to get this number
-    near_range = 688849
-    rg_bandwidth = sensor.range_bandwidth(sensor_name)
-    inc_angle = sensor.incidence_angle(sensor_name, inc_angle) / 180 * np.pi
-    Bperp_c = wvl * (rg_bandwidth/c) * near_range * np.tan(inc_angle)
+    sensor_dict = sensor.SENSOR_DICT[sensor_name.lower()]
+    wvl = SPEED_OF_LIGHT / sensor_dict['carrier_frequency']
+    near_range = 688849  # Yunjun 5/2016, case for Jers, need a automatic way to get this number
+    rg_bandwidth = sensor_dict['chirp_bandwidth']
+    bperp_c = wvl * (rg_bandwidth / SPEED_OF_LIGHT) * near_range * np.tan(inc_angle * np.pi / 180.0)
     if print_msg:
-        print(('Critical Perpendicular Baseline: '+str(Bperp_c)+' m'))
-    return Bperp_c
+        print('Critical Perpendicular Baseline: {} m'.format(bperp_c))
+    return bperp_c
 
 
 def calculate_doppler_overlap(dop_a, dop_b, bandwidth_az):
@@ -261,6 +261,8 @@ def simulate_coherence(date12_list, baseline_file='bl_list.txt', sensor_name='En
         cohs = simulate_coherences(date12_list, 'bl_list.txt', sensor_name='Tsx')
 
     References:
+        Guarnieri, A. M. (2013), Introduction to RADAR, Politecnico di Milano Dipartimento di Elettronica
+            e Informazione, Milano.
         Zebker, H. A., & Villasenor, J. (1992). Decorrelation in interferometric radar echoes.
             IEEE-TGRS, 30(5), 950-959. 
         Hanssen, R. F. (2001). Radar interferometry: data interpretation and error analysis
@@ -275,11 +277,11 @@ def simulate_coherence(date12_list, baseline_file='bl_list.txt', sensor_name='En
     tbase_list = ptime.date_list2tbase(date_list)[0]
 
     # Thermal decorrelation (Zebker and Villasenor, 1992, Eq.4)
-    SNR = sensor.signal2noise_ratio(sensor_name)
+    SNR = 19.5  # hardwired for Envisat (Guarnieri, 2013)
     coh_thermal = 1. / (1. + 1./SNR)
 
     pbase_c = critical_perp_baseline(sensor_name, inc_angle)
-    bandwidth_az = sensor.azimuth_bandwidth(sensor_name)
+    bandwidth_az = sensor.SENSOR_DICT[sensor_name.lower()]['doppler_bandwidth']
 
     date12_list = ptime.yyyymmdd_date12(date12_list)
     ifgram_num = len(date12_list)
@@ -570,31 +572,43 @@ def select_pairs_all(date_list, date12_format='YYMMDD-YYMMDD'):
     return date12_list
 
 
-def select_pairs_sequential(date_list, num_connection=2, date12_format='YYMMDD-YYMMDD'):
+def select_pairs_sequential(date_list, num_conn=2, date_format=None):
     """Select Pairs in a Sequential way:
         For each acquisition, find its num_connection nearest acquisitions in the past time.
-    Inputs:
-        date_list  : list of date in YYMMDD/YYYYMMDD format
+
     Reference:
         Fattahi, H., and F. Amelung (2013), DEM Error Correction in InSAR Time Series, IEEE TGRS, 51(7), 4249-4259.
+
+    Parameters: date_list   - list of str for date
+                num_conn    - int, number of sequential connections
+                date_format - str / None, output date format
+    Returns:    date12_list - list of str for date12 
     """
-    date8_list = sorted(ptime.yyyymmdd(date_list))
-    date6_list = ptime.yymmdd(date8_list)
-    date_idx_list = list(range(len(date6_list)))
+
+    date_list = sorted(date_list)
+    date_inds = list(range(len(date_list)))
 
     # Get pairs index list
-    date12_idx_list = []
-    for date_idx in date_idx_list:
-        for i in range(num_connection):
-            if date_idx-i-1 >= 0:
-                date12_idx_list.append([date_idx-i-1, date_idx])
-    date12_idx_list = [sorted(idx) for idx in sorted(date12_idx_list)]
+    date12_inds = []
+    for date_ind in date_inds:
+        for i in range(num_conn):
+            if date_ind-i-1 >= 0:
+                date12_inds.append([date_ind-i-1, date_ind])
+    date12_inds = [sorted(i) for i in sorted(date12_inds)]
 
     # Convert index into date12
-    date12_list = [date6_list[idx[0]]+'-'+date6_list[idx[1]]
-                   for idx in date12_idx_list]
-    if date12_format == 'YYYYMMDD_YYYYMMDD':
-        date12_list = ptime.yyyymmdd_date12(date12_list)
+    date12_list = ['{}_{}'.format(date_list[ind12[0]], date_list[ind12[1]])
+                  for ind12 in date12_inds]
+
+    # adjust output date format
+    if date_format is not None:
+        if date_format == 'YYYYMMDD':
+            date12_list = ptime.yyyymmdd_date12(date12_list)
+        elif date_format == 'YYMMDD':
+            date12_list = ptime.yymmdd_date12(date12_list)
+        else:
+            raise ValueError('un-supported date format: {}!'.format(date_format))
+
     return date12_list
 
 
@@ -721,9 +735,9 @@ def select_pairs_mst(date_list, pbase_list, date12_format='YYMMDD-YYMMDD'):
 
 
 def select_pairs_star(date_list, m_date=None, pbase_list=[], date12_format='YYMMDD-YYMMDD'):
-    """Select Star-like network/interferograms/pairs, it's a single master network, similar to PS approach.
+    """Select Star-like network/interferograms/pairs, it's a single reference network, similar to PS approach.
     Usage:
-        m_date : master date, choose it based on the following cretiria:
+        m_date : reference date, choose it based on the following cretiria:
                  1) near the center in temporal and spatial baseline
                  2) prefer winter season than summer season for less temporal decorrelation
     Reference:
@@ -732,17 +746,17 @@ def select_pairs_star(date_list, m_date=None, pbase_list=[], date12_format='YYMM
     date8_list = sorted(ptime.yyyymmdd(date_list))
     date6_list = ptime.yymmdd(date8_list)
 
-    # Select master date if not existed
+    # Select reference date if not existed
     if not m_date:
-        m_date = select_master_date(date8_list, pbase_list)
-        print(('auto select master date: '+m_date))
+        m_date = select_reference_date(date8_list, pbase_list)
+        print(('auto select reference date: '+m_date))
 
-    # Check input master date
+    # Check input reference date
     m_date8 = ptime.yyyymmdd(m_date)
     if m_date8 not in date8_list:
-        print('Input master date is not existed in date list!')
-        print(('Input master date: '+str(m_date8)))
-        print(('Input date list: '+str(date8_list)))
+        print('Input reference date is not existed in date list!')
+        print('Input reference date: {}'.format(m_date8))
+        print('Input date list: {}'.format(date8_list))
         m_date8 = None
 
     # Generate star/ps network
@@ -756,9 +770,9 @@ def select_pairs_star(date_list, m_date=None, pbase_list=[], date12_format='YYMM
     return date12_list
 
 
-def select_master_date(date_list, pbase_list=[]):
-    """Select super master date based on input temporal and/or perpendicular baseline info.
-    Return master date in YYYYMMDD format.
+def select_reference_date(date_list, pbase_list=[]):
+    """Select super reference date based on input temporal and/or perpendicular baseline info.
+    Return reference date in YYYYMMDD format.
     """
     date8_list = ptime.yyyymmdd(date_list)
     if not pbase_list:
@@ -787,13 +801,13 @@ def select_master_date(date_list, pbase_list=[]):
     return m_date8
 
 
-def select_master_interferogram(date12_list, date_list, pbase_list, m_date=None):
+def select_reference_interferogram(date12_list, date_list, pbase_list, m_date=None):
     """Select reference interferogram based on input temp/perp baseline info
-    If master_date is specified, select its closest slave_date, which is newer than master_date;
-        otherwise, choose the closest pair among all pairs as master interferogram.
+    If m_date is specified, select its closest s_date, which is newer than m_date;
+        otherwise, choose the closest pair among all pairs as reference interferogram.
     Example:
-        master_date12   = pnet.select_master_ifgram(date12_list, date_list, pbase_list)
-        '080211-080326' = pnet.select_master_ifgram(date12_list, date_list, pbase_list, m_date='080211')
+        m_date12   = pnet.select_reference_ifgram(date12_list, date_list, pbase_list)
+        '080211-080326' = pnet.select_reference_ifgram(date12_list, date_list, pbase_list, m_date='080211')
     """
     pbase_array = np.array(pbase_list, dtype='float64')
     # Get temporal baseline
@@ -810,7 +824,7 @@ def select_master_interferogram(date12_list, date_list, pbase_list, m_date=None)
     base_distance = np.sqrt((tbase_array[idx2] - tbase_array[idx1])**2 +
                             (pbase_array[idx2] - pbase_array[idx1])**2)
 
-    # Get master interferogram index
+    # Get reference interferogram index
     if not m_date:
         # Choose pair with shortest temp/perp baseline
         m_date12_idx = np.argmin(base_distance)

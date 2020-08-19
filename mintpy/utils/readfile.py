@@ -253,8 +253,11 @@ def read_hdf5_file(fname, datasetName=None, box=None):
         datasetName = [ds_list[0]]
     elif isinstance(datasetName, str):
         datasetName = [datasetName]
-    if all(i.isdigit() for i in datasetName):
+
+    # if datasetName is all numerical (or include only T), add dsFamily as prefix
+    if all(i.replace('T','').isdigit() for i in datasetName):
         datasetName = ['{}-{}'.format(ds_3d_list[0], i) for i in datasetName]
+
     # Input Argument: decompose slice list into dsFamily and inputDateList
     dsFamily = datasetName[0].split('-')[0]
     inputDateList = [i.replace(dsFamily,'').replace('-','') for i in datasetName]
@@ -829,8 +832,6 @@ def read_template(fname, delimiter='=', print_msg=True):
     Examples:
         tmpl = read_template(KyushuT424F610_640AlosA.template)
         tmpl = read_template(R1_54014_ST5_L0_F898.000.pi, ':')
-        from mintpy.defaults.auto_path import isceAutoPath
-        tmpl = read_template(isceAutoPath, print_msg=False)
     """
     template_dict = {}
     plotAttributeDict = {}
@@ -1027,7 +1028,7 @@ def read_gdal_vrt(fname, standardize=True):
     Modified from $ISCE_HOME/applications/gdal2isce_xml.gdal2isce_xml() written by David Bekaert.
     """
     try:
-        import gdal
+        from osgeo import gdal
     except ImportError:
         raise ImportError('Cannot import gdal!')
 

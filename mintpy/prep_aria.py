@@ -12,10 +12,10 @@ import argparse
 import h5py
 import numpy as np
 import glob
-from mintpy.objects import ifgramStack
+from mintpy.objects import ifgramStack, geometry, sensor
 from mintpy.utils import ptime, readfile, writefile, utils as ut
 try:
-    import gdal
+    from osgeo import gdal
 except ImportError:
     raise ImportError('Can not import gdal [version>=3.0]!')
 
@@ -106,7 +106,7 @@ def cmd_line_parse(iargs = None):
         inps = read_template2inps(inps.template_file, inps)
 
     # --stack-dir
-    if inps.stackDir is not None:
+    elif inps.stackDir is not None:
         inps.stackDir = os.path.abspath(inps.stackDir)
         inps.corFile = os.path.join(inps.stackDir, inps.corFile)
         inps.unwFile = os.path.join(inps.stackDir, inps.unwFile)
@@ -122,17 +122,20 @@ def cmd_line_parse(iargs = None):
     for key in ds_keys:
         fname = iDict[key]
 
+        # search for wildcard pattern
         if fname:
             fnames = glob.glob(fname)
         else:
             fnames = []
 
+        # user the first element if more than one exist
         if len(fnames) > 0:
             iDict[key] = fnames[0]
 
         elif key in required_ds_keys:
+            # raise exception if any required DS is missing
             parser.print_usage()
-            raise SystemExit('ERROR: required dataset "{}" not found in: {}.'.format(key, fname))
+            raise SystemExit('ERROR: no file found for {} in input path: "{}"!'.format(key, iDict[key]))
 
     return inps
 
@@ -231,6 +234,7 @@ def extract_metadata(stack):
     meta["WAVELENGTH"] = float(meta["Wavelength (m)"])
     meta["WIDTH"] = ds.RasterXSize
     meta["NUMBER_OF_PAIRS"] = ds.RasterCount
+    meta["STARTING_RANGE"] = float(meta["startRange"])
 
     # Note from YZ, 2019-07-25
     # convert isce azimuth angle to roipac orbit heading angle
@@ -251,7 +255,12 @@ def extract_metadata(stack):
     meta["ALOOKS"] = 7
     meta["RLOOKS"] = 19
     meta["RANGE_PIXEL_SIZE"] = float(meta["slantRangeSpacing"]) * meta["RLOOKS"]
-    meta["STARTING_RANGE"] = float(meta["startRange"])
+
+    # number of independent looks
+    sen_dict = sensor.SENSOR_DICT['sen']
+    rgfact = sen_dict['IW2']['range_resolution'] / sen_dict['range_pixel_size']
+    azfact = sen_dict['IW2']['azimuth_resolution'] / sen_dict['azimuth_pixel_size']
+    meta['NCORRLOOKS'] = meta['RLOOKS'] * meta['ALOOKS'] / (rgfact * azfact)
 
     # geo transformation
     geoTrans = ds.GetGeoTransform()
@@ -383,6 +392,7 @@ def write_ifgram_stack(outfile, unwStack, cohStack, connCompStack):
     for ii in range(nPairs):
         d12 = d12List[ii]
         bndIdx = d12BandDict[d12]
+        prog_bar.update(ii+1, suffix='{}'.format(d12))
 
         h5["date"][ii,0] = d12.split("_")[0].encode("utf-8")
         h5["date"][ii,1] = d12.split("_")[1].encode("utf-8")
@@ -406,7 +416,6 @@ def write_ifgram_stack(outfile, unwStack, cohStack, connCompStack):
         data[data == noDataValueComp] = 0     #assign pixel with no-data to 0
         h5["connectComponent"][ii,:,:] = data
 
-        prog_bar.update(ii+1, suffix='{}'.format(d12))
     prog_bar.close()
 
     # add MODIFICATION_TIME metadata to each 3D dataset
@@ -428,11 +437,12 @@ def main(iargs=None):
         print('update mode: ON')
     else:
         print('update mode: OFF')
+
     # extract metadata
-    metadata = extract_metadata(inps.unwFile)
-    inps.length = metadata["LENGTH"]
-    inps.width = metadata["WIDTH"]
-    inps.num_pair = metadata["NUMBER_OF_PAIRS"]
+    meta = extract_metadata(inps.unwFile)
+    inps.length = meta["LENGTH"]
+    inps.width = meta["WIDTH"]
+    inps.num_pair = meta["NUMBER_OF_PAIRS"]
 
     # prepare output directory
     out_dir = os.path.dirname(inps.outfile[0])
@@ -452,8 +462,8 @@ def main(iargs=None):
 
     if run_or_skip(inps, dsNameDict, out_file=inps.outfile[0]) == 'run':
         # initiate h5 file with defined structure
-        metadata['FILE_TYPE'] = 'ifgramStack'
-        writefile.layout_hdf5(inps.outfile[0], dsNameDict, metadata)
+        meta['FILE_TYPE'] = 'ifgramStack'
+        writefile.layout_hdf5(inps.outfile[0], dsNameDict, meta)
 
         # write data to h5 file in disk
         write_ifgram_stack(inps.outfile[0],
@@ -475,8 +485,8 @@ def main(iargs=None):
 
     if run_or_skip(inps, dsNameDict, out_file=inps.outfile[1]) == 'run':
         # initiate h5 file with defined structure
-        metadata['FILE_TYPE'] = 'geometry'
-        writefile.layout_hdf5(inps.outfile[1], dsNameDict, metadata)
+        meta['FILE_TYPE'] = 'geometry'
+        writefile.layout_hdf5(inps.outfile[1], dsNameDict, meta)
 
         # write data to disk
         write_geometry(inps.outfile[1],

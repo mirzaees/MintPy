@@ -10,9 +10,11 @@ import os
 import re
 import argparse
 import numpy as np
+from mintpy.objects import sensor
 from mintpy.utils import readfile, writefile, ptime, utils as ut
 
 
+SPEED_OF_LIGHT = 299792458  # m/s
 # list of par file extension for SAR images
 PAR_EXT_LIST = ['.amp.par', '.ramp.par', '.mli.par']
 
@@ -20,7 +22,7 @@ PAR_EXT_LIST = ['.amp.par', '.ramp.par', '.mli.par']
 ##################################################################################################
 EXAMPLE = """example:
   prep_gamma.py  diff_filt_HDR_20130118_20130129_4rlks.unw
-  prep_gamma.py  interferograms/*/diff_*rlks.unw
+  prep_gamma.py  interferograms/*/diff_*rlks.unw --sensor sen
   prep_gamma.py  interferograms/*/filt_*rlks.cor
   prep_gamma.py  interferograms/*/diff_*rlks.int
   prep_gamma.py  sim_20150911_20150922.hgt_sim
@@ -30,8 +32,8 @@ EXAMPLE = """example:
 
 DESCRIPTION = """
   For each interferogram, including unwrapped/wrapped interferograms and coherence, 3 metadata files are required:
-  1) master .par file, e.g. 130118_4rlks.amp.par
-  2) slave  .par file, e.g. 130129_4rlks.amp.par
+  1) reference .par file, e.g. 130118_4rlks.amp.par
+  2) secondary .par file, e.g. 130129_4rlks.amp.par
   3) interferogram .off file, e.g. 130118-130129_4rlks.off
 
   Other metadata files are recommended and can be generated from the above 3 if not existed, more specifically:
@@ -101,8 +103,8 @@ def create_parser():
                                      epilog=EXAMPLE)
 
     parser.add_argument('file', nargs='+', help='Gamma file(s)')
-    parser.add_argument('--no-parallel', dest='parallel', action='store_false', default=True,
-                        help='Disable parallel processing. Diabled auto for 1 input file.')
+    parser.add_argument('--sensor', dest='sensor', type=str, choices=sensor.SENSOR_NAMES,
+                        help='SAR sensor')
     return parser
 
 
@@ -118,15 +120,15 @@ def cmd_line_parse(iargs=None):
     if inps.file_ext not in ext_list:
         msg = 'unsupported input file extension: {}'.format(inps.file_ext)
         msg += '\nsupported file extensions: {}'.format(ext_list)
-        raise ValueError() 
+        raise ValueError()
     return inps
 
 
 ######################################## Sub Functions ############################################
 def get_perp_baseline(m_par_file, s_par_file, off_file, atr_dict={}):
-    """Get perpendicular baseline info from master/slave par file and off file.
-    Parameters: m_par_file : str, path, master parameter file, i.e. 130118_4rlks.amp.par
-                s_par_file : str, path, slave  parameter file, i.e. 130129_4rlks.amp.oar
+    """Get perpendicular baseline info from reference/secondary par file and off file.
+    Parameters: m_par_file : str, path, reference parameter file, i.e. 130118_4rlks.amp.par
+                s_par_file : str, path, secondary parameter file, i.e. 130129_4rlks.amp.oar
                 off_file   : str, path, interferogram off file, i.e. 130118-130129_4rlks.off
                 atr_dict   : dict, optional, attributes dictionary
     Returns:  bperp : str, perpendicular baseline for pixel at [0,0]
@@ -177,7 +179,7 @@ def get_lalo_ref(m_par_file, atr_dict={}):
     If it's not existed, call Gamma script - SLC_corners - to generate it from SLC par file
         e.g. 130118_4rlks.amp.par
 
-    Parameters: m_par_file : str, path, master date parameter file, i.e. 130118_4rlks.amp.par
+    Parameters: m_par_file : str, path, reference date parameter file, i.e. 130118_4rlks.amp.par
                 atr_dict   : dict, optional, attributes dictionary
     Returns:    lalo_ref
     """
@@ -213,7 +215,7 @@ def get_lalo_ref(m_par_file, atr_dict={}):
     return atr_dict
 
 
-def extract_metadata4interferogram(fname):
+def extract_metadata4interferogram(fname, sensor_name=None):
     """Read/extract attributes from Gamma .unw, .cor and .int file
     Parameters: fname : str, Gamma interferogram filename or path,
                     i.e. /PopoSLT143TsxD/diff_filt_HDR_130118-130129_4rlks.unw
@@ -249,12 +251,12 @@ def extract_metadata4interferogram(fname):
         m_par_file = ut.get_file_list(m_par_files)[0]
     except:
         m_par_file = None
-        print('\nERROR: Can not find master date .par file, it supposed to be like: '+m_par_files)
+        print('\nERROR: Can not find reference date .par file, it supposed to be like: '+m_par_files)
     try:
         s_par_file = ut.get_file_list(s_par_files)[0]
     except:
         s_par_file = None
-        print('\nERROR: Can not find slave date .par file, it supposed to be like: '+s_par_files)
+        print('\nERROR: Can not find secondary date .par file, it supposed to be like: '+s_par_files)
 
     try:
         off_file = ut.get_file_list(off_files)[0]
@@ -274,6 +276,21 @@ def extract_metadata4interferogram(fname):
 
     # LAT/LON_REF1/2/3/4
     atr = get_lalo_ref(m_par_file, atr)
+
+    # NCORRLOOKS
+    if sensor_name:
+        rg_bandwidth = float(atr['chirp_bandwidth'])
+        rg_resolution = SPEED_OF_LIGHT / (2. * rg_bandwidth)
+        rg_pixel_size = float(atr['RANGE_PIXEL_SIZE']) / float(atr['RLOOKS'])
+        rg_fact = rg_resolution / rg_pixel_size
+
+        antenna_length = sensor.SENSOR_DICT[sensor_name]['antenna_length']
+        az_resolution = antenna_length / 2
+        az_pixel_size = float(atr['AZIMUTH_PIXEL_SIZE']) / float(atr['ALOOKS'])
+        az_fact = az_resolution / az_pixel_size
+
+        ncorr_looks = float(atr['RLOOKS']) * float(atr['ALOOKS']) / (rg_fact * az_fact)
+        atr['NCORRLOOKS'] = ncorr_looks
 
     # Write to .rsc file
     try:
@@ -318,7 +335,7 @@ def extract_metadata4geometry_radar(fname):
         m_date = str(re.findall('\d{6}', fname_base)[0])
 
     # search existing par file
-    geom_dir = os.path.dirname(fname)              #PROJECT_DIR/geom_master
+    geom_dir = os.path.dirname(fname)              #PROJECT_DIR/geom_reference
     ifg_dir = os.path.join(geom_dir, '../*/{}_*'.format(m_date))  #PROJECT_DIR/interferograms/{m_date}_20141225
     m_par_files = [os.path.join(geom_dir, '*{}*{}'.format(m_date, ext)) for ext in PAR_EXT_LIST]
     m_par_files += [os.path.join(ifg_dir, '*{}*{}'.format(m_date, ext)) for ext in PAR_EXT_LIST]
@@ -415,7 +432,7 @@ def main(iargs=None):
     for fname in inps.file:
         # interferograms
         if inps.file_ext in ['.unw', '.cor', '.int']:
-            extract_metadata4interferogram(fname)
+            extract_metadata4interferogram(fname, sensor_name=inps.sensor.lower())
 
         # geometry - geo
         elif inps.file_ext in ['.UTM_TO_RDC'] or fname.endswith('.utm.dem'):

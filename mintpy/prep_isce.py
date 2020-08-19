@@ -20,12 +20,12 @@ from mintpy.utils import (
 
 EXAMPLE = """example:
   # interferogram stack
-  prep_isce.py -d ./merged/interferograms -m ./master/IW1.xml -b ./baselines -g ./merged/geom_master  #for topsStack
-  prep_isce.py -d ./Igrams -m ./masterShelve/data.dat -b ./baselines -g ./geom_master                 #for stripmapStack
-  prep_isce.py -m 20120507_slc_crop.xml -g ./geometry                                                 #for stripmapApp
+  prep_isce.py -d ./merged/interferograms -m ./reference/IW1.xml -b ./baselines -g ./merged/geom_reference  #for topsStack
+  prep_isce.py -d ./Igrams -m ./referenceShelve/data.dat -b ./baselines -g ./geom_reference                 #for stripmapStack
+  prep_isce.py -m 20120507_slc_crop.xml -g ./geometry                                                       #for stripmapApp
 
   # offset stack from topsStack
-  prep_isce.py -d ./merged/offsets -f filtAz*.off -m ./master/IW1.xml -b ./baselines -g ./merged/offsets/geom_master
+  prep_isce.py -d ./merged/offsets -f filtAz*.off -m ./reference/IW1.xml -b ./baselines -g ./merged/offsets/geom_reference
 """
 
 def create_parser():
@@ -44,8 +44,8 @@ def create_parser():
                              '      filtAz*.off filtRa*.off')
     parser.add_argument('-m', '--meta-file', dest='metaFile', type=str, default=None,
                         help='Metadata file to extract common metada for the stack:\n'
-                             'e.g.: for ISCE/topsStack: master/IW3.xml;\n'
-                             '      for ISCE/stripmapStack: masterShelve/data.dat')
+                             'e.g.: for ISCE/topsStack: reference/IW3.xml;\n'
+                             '      for ISCE/stripmapStack: referenceShelve/data.dat')
     parser.add_argument('-b', '--baseline-dir', dest='baselineDir', type=str, default=None,
                         help=' directory with baselines ')
     parser.add_argument('-g', '--geometry-dir', dest='geometryDir', type=str, default=None,
@@ -77,7 +77,10 @@ def add_ifgram_metadata(metadata_in, dates=[], baseline_dict={}):
     for k in metadata_in.keys():
         metadata[k] = metadata_in[k]
 
+    # DATE12
     metadata['DATE12'] = '{}-{}'.format(dates[0][2:], dates[1][2:])
+
+    # P_BASELINE*
     if baseline_dict:
         bperp_top = baseline_dict[dates[1]][0] - baseline_dict[dates[0]][0]
         bperp_bottom = baseline_dict[dates[1]][1] - baseline_dict[dates[0]][1]
@@ -125,18 +128,11 @@ def prepare_stack(inputDir, filePattern, metadata=dict(), baseline_dict=dict(), 
     num_file = len(isce_files)
     prog_bar = ptime.progressBar(maxValue=num_file)
     for i in range(num_file):
-        isce_file = isce_files[i]
         # prepare metadata for current file
+        isce_file = isce_files[i]
+        dates = os.path.basename(os.path.dirname(isce_file)).split('_')  # to modify to YYYYMMDDTHHMMSS
         ifg_metadata = readfile.read_attribute(isce_file, metafile_ext='.xml')
         ifg_metadata.update(metadata)
-
-        dates = os.path.basename(os.path.dirname(isce_file)).split('_')
-        if len(dates) == 1:
-            date1 = metadata['startUTC'][0:10].replace('-', '') #could also be done using datetime
-            date2 = os.path.basename(os.path.dirname(isce_file))
-            dates = [date1, date2]
-
-
         ifg_metadata = add_ifgram_metadata(ifg_metadata, dates, baseline_dict)
 
         # write .rsc file

@@ -11,6 +11,7 @@
 import os
 import time
 import glob
+import shutil
 import h5py
 import numpy as np
 from mintpy.objects import deramp, ifgramStack, timeseries, geometryDatasetNames
@@ -80,11 +81,11 @@ def get_residual_std(timeseries_resid_file, mask_file='maskTempCoh.h5', ramp_typ
 
 def get_residual_rms(timeseries_resid_file, mask_file='maskTempCoh.h5', ramp_type='quadratic'):
     """Calculate deramped Root Mean Square in space for each epoch of input timeseries file.
-    Parameters: timeseries_resid_file : string, 
+    Parameters: timeseries_resid_file : string,
                     timeseries HDF5 file, e.g. timeseries_ERA5_demErrInvResid.h5
                 mask_file : string,
                     mask file, e.g. maskTempCoh.h5
-                ramp_type : string, 
+                ramp_type : string,
                     ramp type, e.g. linear, quadratic, no for do not remove ramp
     Returns:    rms_list : list of float,
                     Root Mean Square of deramped input timeseries file
@@ -210,7 +211,7 @@ def spatial_average(File, datasetName='coherence', maskFile=None, box=None,
             mask_line_orig = [i for i in lines if '# Mask file:' in i][0]
         except:
             mask_line_orig = ''
-        if (aoi_line_orig == aoi_line 
+        if (aoi_line_orig == aoi_line
                 and mask_line_orig == mask_line
                 and run_or_skip(out_file=txtFile,
                                 in_file=[File, maskFile],
@@ -384,14 +385,25 @@ def get_file_list(file_list, abspath=False, coord=None):
 
 
 def get_lookup_file(filePattern=None, abspath=False, print_msg=True):
-    """Find lookup table file with/without input file pattern"""
+    """Find lookup table file with/without input file pattern
+    Parameters: filePattern - list of str
+                abspath     - bool, return absolute path or not
+                print_msg   - bool, printout message or not
+    Returns:    outFile     - str, path of the lookup file
+    """
     # Search Existing Files
     if not filePattern:
-        filePattern = ['geometryRadar.h5',
-                       'geometryGeo_tight.h5', 'geometryGeo.h5',
-                       'geomap*lks_tight.trans', 'geomap*lks.trans',
-                       'sim*_tight.UTM_TO_RDC', 'sim*.UTM_TO_RDC']
-        filePattern = [os.path.join('inputs', i) for i in filePattern] + filePattern
+        fileList = ['geometryRadar.h5',
+                    'geometryGeo_tight.h5', 'geometryGeo.h5',
+                    'geomap*lks_tight.trans', 'geomap*lks.trans',
+                    'sim*_tight.UTM_TO_RDC', 'sim*.UTM_TO_RDC']
+        dirList = ['inputs', '', '../inputs']
+
+        # file/dirList --> filePattern
+        filePattern = []
+        for dirname in dirList:
+            filePattern += [os.path.join(dirname, fname) for fname in fileList]
+
     existFiles = []
     try:
         existFiles = get_file_list(filePattern)
@@ -486,8 +498,7 @@ def update_template_file(template_file, extra_dict):
     f_tmp.close()
 
     # Overwrite exsting original template file
-    mvCmd = 'mv {} {}'.format(tmp_file, template_file)
-    os.system(mvCmd)
+    shutil.move(tmp_file, template_file)
     return template_file
 
 
@@ -603,7 +614,7 @@ def run_or_skip(out_file, in_file=None, check_readable=True, print_msg=True):
                 if ut.run_or_skip(out_file='exclude_date.txt',
                                   in_file=['timeseries_ERA5_demErrInvResid.h5',
                                            'maskTempCoh.h5',
-                                           'smallbaselineApp.cfg'],  
+                                           'smallbaselineApp.cfg'],
                                   check_readable=False):
     """
     # 1 - check existance of output files
@@ -623,9 +634,7 @@ def run_or_skip(out_file, in_file=None, check_readable=True, print_msg=True):
         except:
             if print_msg:
                 print('{} exists, but can not read, remove it.'.format(out_file[0]))
-            rmCmd = 'rm {}'.format(out_file[0])
-            print(rmCmd)
-            os.system(rmCmd)
+            os.remove(out_file[0])
             return 'run'
 
     # 3 - check modification time of output and input files
@@ -748,4 +757,3 @@ def run_deramp(fname, ramp_type, mask_file=None, out_file=None, datasetName=None
     m, s = divmod(time.time()-start_time, 60)
     print('time used: {:02.0f} mins {:02.1f} secs.'.format(m, s))
     return out_file
-

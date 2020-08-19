@@ -14,7 +14,6 @@ import datetime
 import inspect
 import matplotlib.pyplot as plt
 from mintpy.objects import sensor, ifgramStack
-from mintpy.defaults.auto_path import autoPath
 from mintpy.defaults.template import get_template_content
 from mintpy.utils import (ptime,
                           readfile,
@@ -108,8 +107,8 @@ def create_parser():
     method.add_argument('--no-norm', dest='norm', action='store_false',
                         help='do not normalize temp/perp baseline, for delaunay method')
     method.add_argument('--sensor', help='Name of sensor, choose from the list below:\n'+str(SENSOR_NAMES))
-    method.add_argument('--master-date', dest='masterDate',
-                        help='Master date in YYMMDD or YYYYMMDD format, for star/ps method')
+    method.add_argument('--reference-date', dest='referenceDate',
+                        help='reference date in YYMMDD or YYYYMMDD format, for star/ps method')
 
     # Thresholds
     threshold = parser.add_argument_group('Thresholds to filter the initial network')
@@ -199,7 +198,7 @@ def read_template2inps(templateFile, inps=None):
             if key in ['method', 'referenceFile', 'tempPerpList']:
                 inpsDict[key] = value
             # date in YYYYMMDD
-            elif key in ['masterDate', 'startDate', 'endDate']:
+            elif key in ['referenceDate', 'startDate', 'endDate']:
                 inpsDict[key] = ptime.yyyymmdd(value)
             # list of dates in YYYYMMDD
             elif key in ['excludeDate']:
@@ -246,7 +245,7 @@ def read_template2inps(templateFile, inps=None):
 
     # Output directory/filename
     if not inps.outfile:
-        if autoPath and 'SCRATCHDIR' in os.environ:
+        if 'SCRATCHDIR' in os.environ:
             inps.out_dir = os.getenv('SCRATCHDIR')+'/'+project_name+'/PROCESS'
         else:
             try:
@@ -256,7 +255,7 @@ def read_template2inps(templateFile, inps=None):
         inps.outfile = inps.out_dir+'/ifgram_list.txt'
 
     # Auto path of bl_list.txt file (for Miami user)
-    if not inps.baseline_file and autoPath and 'SCRATCHDIR' in os.environ:
+    if not inps.baseline_file and 'SCRATCHDIR' in os.environ:
         bl_file = os.path.join(os.getenv('SCRATCHDIR'), '{}/SLC/bl_list.txt'.format(project_name))
         if os.path.isfile(bl_file):
             inps.baseline_file = bl_file
@@ -386,7 +385,7 @@ def prune_network(date12_list, inps):
 
         # Doppler Overlap Percentage
         if inps.sensor and inps.dop_list:
-            bandwidth_az = sensor.azimuth_bandwidth(inps.sensor)
+            bandwidth_az = sensor.SENSOR_DICT[inps.sensor.lower()]['doppler_bandwidth']
             date12_list = pnet.threshold_doppler_overlap(date12_list,
                                                          inps.date_list,
                                                          inps.dop_list,

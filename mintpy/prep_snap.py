@@ -12,7 +12,7 @@ import sys
 import argparse
 import datetime
 import math
-from mintpy.objects.sensor import standardedSensorNames
+from mintpy.objects.sensor import standardize_sensor_name
 from mintpy.utils import readfile, writefile, utils as ut
 
 
@@ -175,11 +175,11 @@ def extract_snap_metadata(fname):
                 rg_pixel.append(line.split(">")[1].split("<")[0])
             if "incidenceAngleMidSwath" in line:
                 inc_angle_mid = line.split(">")[1].split("<")[0]
-            if '"x"' in line:
+            if "x_pos" in line:
                 x.append(line.split(">")[1].split("<")[0])
-            if '"y"' in line:
+            if "y_pos" in line:
                 y.append(line.split(">")[1].split("<")[0])
-            if '"z"' in line:
+            if "z_pos" in line:
                 z.append(line.split(">")[1].split("<")[0])
 
     atr = {}
@@ -192,7 +192,7 @@ def extract_snap_metadata(fname):
                       center_utc.second)
     atr["CENTER_LINE_UTC"] = center_seconds
 
-    # Extract master slave date in yymmdd format
+    # Extract reference / secondary date in yymmdd format
     date1 = datetime.datetime.strptime(dates[0], "%d%b%Y").strftime("%Y%m%d")[2:8]
     date2 = datetime.datetime.strptime(dates[1], "%d%b%Y").strftime("%Y%m%d")[2:8]
     atr["DATE12"] = "{}-{}".format(date1, date2)
@@ -224,7 +224,7 @@ def extract_snap_metadata(fname):
     atr["ALOOKS"] = int(float(azimuth_looks[0]))
     atr["RLOOKS"] = int(float(range_looks[0]))
     atr["PRF"] = prf
-    atr["PLATFORM"] = standardedSensorNames[platform.replace('-','').lower()]
+    atr["PLATFORM"] = standardize_sensor_name(platform)
     atr["HEADING"] = heading
     atr["EARTH_RADIUS"] =  earth_radius
     atr["HEIGHT"] = height
@@ -265,7 +265,11 @@ def write_rsc(atr, out_file):
 ##################################################################################################
 def main(iargs=None):
     inps = cmd_line_parse(iargs)
+
     for img_file in inps.file:
+        if not img_file.endswith('.img'):
+            raise ValueError('input data file does not end with .img: {}'.format(img_file))
+
         # *.dim metadata file for the input *.img data file
         dim_file = os.path.dirname(img_file)[:-4]+'dim'
 

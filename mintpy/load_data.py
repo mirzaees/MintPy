@@ -52,17 +52,18 @@ DEFAULT_TEMPLATE = """template:
 ########## 1. Load Data (--load to exit after this step)
 {}\n
 {}\n
-{}\n
-""".format(auto_path.isceAutoPath,
-           auto_path.roipacAutoPath,
-           auto_path.gammaAutoPath)
+{}""".format(
+    auto_path.AUTO_PATH_GAMMA,
+    auto_path.AUTO_PATH_ISCE_STRIPMAP,
+    auto_path.AUTO_PATH_ISCE_TOPS,
+)
 
 TEMPLATE = get_template_content('load_data')
 
 NOTE = """NOTE:
   For interferogram, unwrapPhase is required, the other dataset are optional, including coherence, connectComponent, wrapPhase, etc.
   The unwrapPhase metadata file requires DATE12 attribute in YYMMDD-YYMMDD format.
-  All path of data file must contain the master and slave date, either in file name or folder name.
+  All path of data file must contain the reference and secondary date, either in file name or folder name.
 """
 
 EXAMPLE = """example:
@@ -109,11 +110,14 @@ def cmd_line_parse(iargs=None):
     parser = create_parser()
     inps = parser.parse_args(args=iargs)
 
+    # check --template option
     if inps.template_file:
         pass
+
     elif inps.print_example_template:
         print(DEFAULT_TEMPLATE)
         sys.exit(0)
+
     else:
         parser.print_usage()
         print(('{}: error: one of the following arguments are required:'
@@ -149,10 +153,11 @@ def read_inps2dict(inps):
     key_list = [i.split(prefix)[1] for i in template.keys() if i.startswith(prefix)]
     for key in key_list:
         value = template[prefix+key]
-        if key in ['processor', 'updateMode', 'compression']:
+        if key in ['processor', 'autoPath', 'updateMode', 'compression']:
             inpsDict[key] = template[prefix+key]
         elif value:
             inpsDict[prefix+key] = template[prefix+key]
+    print('processor : {}'.format(inpsDict['processor']))
 
     if inpsDict['compression'] == False:
         inpsDict['compression'] = None
@@ -161,20 +166,21 @@ def read_inps2dict(inps):
     if not inpsDict['PROJECT_NAME']:
         cfile = [i for i in list(inps.template_file) if os.path.basename(i) != 'smallbaselineApp.cfg']
         inpsDict['PROJECT_NAME'] = sensor.project_name2sensor_name(cfile)[1]
-    inpsDict['PLATFORM'] = str(sensor.project_name2sensor_name(str(inpsDict['PROJECT_NAME']))[0])
-    if inpsDict['PLATFORM']:
-        print('SAR platform/sensor : {}'.format(inpsDict['PLATFORM']))
-    print('processor: {}'.format(inpsDict['processor']))
 
-    # Here to insert code to check default file path for miami user
-    if (auto_path.autoPath
-            and 'SCRATCHDIR' in os.environ
-            and inpsDict['PROJECT_NAME'] is not None
-            and inpsDict['mintpy.load.unwFile']) == 'auto':
-        print(('check auto path setting for Univ of Miami users'
-               ' for processor: {}'.format(inpsDict['processor'])))
+    msg = 'SAR platform/sensor : '
+    sensor_name = sensor.project_name2sensor_name(str(inpsDict['PROJECT_NAME']))[0]
+    if sensor_name:
+        msg += str(sensor_name)
+        inpsDict['PLATFORM'] = str(sensor_name)
+    else:
+        msg += 'unknown from project name "{}"'.format(inpsDict['PROJECT_NAME'])
+    print(msg)
+
+    # update file path with auto
+    if inpsDict.get('autoPath', False):
+        print('use auto path defined in mintpy.defaults.auto_path for options in auto')
         inpsDict = auto_path.get_auto_path(processor=inpsDict['processor'],
-                                           project_name=inpsDict['PROJECT_NAME'],
+                                           work_dir=os.path.dirname(inpsDict['outdir']),
                                            template=inpsDict)
     return inpsDict
 
@@ -388,30 +394,40 @@ def read_inps_dict2ifgram_stack_dict_object(inpsDict):
     dsNameList = list(dsPathDict.keys())
     pairsDict = {}
     for dsPath in dsPathDict[dsName0]:
-        dates = ptime.yyyymmdd(readfile.read_attribute(dsPath)['DATE12'].split('-'))
+        # date string used in the file/dir path
+        # YYYYMMDDTHHMM for uavsar
+        # YYYYMMDD for all the others
+        date12 = readfile.read_attribute(dsPath)['DATE12'].replace('_','-')
+        dates = ptime.yyyymmdd(date12.split('-'))
 
         #####################################
         # A dictionary of data files for a given pair.
         # One pair may have several types of dataset.
         # example ifgramPathDict = {'unwrapPhase': /pathToFile/filt.unw,
         #                           'ionoPhase'  : /PathToFile/iono.bil}
-        # All path of data file must contain the master and slave date, either in file name or folder name.
+        # All path of data file must contain the reference and secondary date, either in file name or folder name.
 
         ifgramPathDict = {}
         for i in range(len(dsNameList)):
             dsName = dsNameList[i]
             dsPath1 = dsPathDict[dsName][0]
-            if all(d[2:8] in dsPath1 for d in dates):
+
+            if all(d[2:] in dsPath1 for d in dates):
                 ifgramPathDict[dsName] = dsPath1
+
             else:
                 dsPath2 = [i for i in dsPathDict[dsName]
-                           if all(d[2:8] in i for d in dates)]
+                           if all(d[2:] in i for d in dates)]
+
                 if len(dsPath2) > 0:
                     ifgramPathDict[dsName] = dsPath2[0]
                 else:
                     print('WARNING: {} file missing for pair {}'.format(dsName, dates))
-        ifgramObj = ifgramDict(dates=tuple(dates),
-                               datasetDict=ifgramPathDict)
+
+        # initiate ifgramDict object
+        ifgramObj = ifgramDict(datasetDict=ifgramPathDict)
+
+        # update pairsDict object
         pairsDict[tuple(dates)] = ifgramObj
 
     if len(pairsDict) > 0:
@@ -543,13 +559,28 @@ def prepare_metadata(inpsDict):
     print('prepare metadata files for {} products'.format(processor))
 
     if processor in ['gamma', 'roipac', 'snap']:
+        # import prep_module
+        if processor == 'gamma':
+            from mintpy import prep_gamma as prep_module
+        elif processor == 'roipac':
+            from mintpy import prep_roipac as prep_module
+        elif processor == 'snap':
+            from mintpy import prep_snap as prep_module
+
+        # run prep_{processor} module
         for key in [i for i in inpsDict.keys() if (i.startswith('mintpy.load.') and i.endswith('File'))]:
             if len(glob.glob(str(inpsDict[key]))) > 0:
-                cmd = '{} {}'.format(script_name, inpsDict[key])
-                print(cmd)
-                os.system(cmd)
+                # print command line
+                script_name = '{}.py'.format(os.path.basename(prep_module.__name__).split('.')[-1])
+                iargs = [inpsDict[key]]
+                if processor == 'gamma' and inpsDict['PLATFORM']:
+                    iargs += ['--sensor', inpsDict['PLATFORM'].lower()]
+                print(script_name, ' '.join(iargs))
+                # run
+                prep_module.main(iargs)
 
     elif processor == 'isce':
+        from mintpy import prep_isce
         meta_files = sorted(glob.glob(inpsDict['mintpy.load.metaFile']))
         if len(meta_files) < 1:
             warnings.warn('No input metadata file found: {}'.format(inpsDict['mintpy.load.metaFile']))
@@ -570,14 +601,17 @@ def prepare_metadata(inpsDict):
                 obs_dir = None
                 obs_file = None
 
-            # command line
-            cmd = '{s} -m {m} -g {g}'.format(s=script_name, m=meta_file, g=geom_dir)
+            # compose list of input arguments
+            iargs = ['-m', meta_file, '-g', geom_dir]
             if baseline_dir:
-                cmd += ' -b {b} '.format(b=baseline_dir)
+                iargs += ['-b', baseline_dir]
             if obs_dir is not None:
-                cmd += ' -d {d} -f {f} '.format(d=obs_dir, f=obs_file)
-            print(cmd)
-            os.system(cmd)
+                iargs += ['-d', obs_dir, '-f', obs_file]
+            print('prep_isce.py', ' '.join(iargs))
+            
+            # run module
+            prep_isce.main(iargs)
+
         except:
             pass
     return

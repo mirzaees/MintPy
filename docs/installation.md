@@ -52,7 +52,7 @@ git clone https://github.com/yunjunz/pyaps3.git $PYAPS_HOME/pyaps3
 
 ### 2. Install dependencies ###
 
-MintPy is written in Python3 and relies on several Python modules, check the [requirements.txt](https://github.com/insarlab/MintPy/blob/master/docs/requirements.txt) file for details. We recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) or [macports](https://www.macports.org/install.php) to install the python environment and the prerequisite packages, because of the convenient managenment and default [performance setting with numpy/scipy](http://markus-beuckelmann.de/blog/boosting-numpy-blas.html) and [pyresample](https://pyresample.readthedocs.io/en/latest/installation.html#using-pykdtree).
+MintPy is written in Python3 and relies on several Python modules, check the [requirements.txt](https://github.com/insarlab/MintPy/blob/main/docs/requirements.txt) file for details. We recommend using [conda](https://docs.conda.io/en/latest/miniconda.html) or [macports](https://www.macports.org/install.php) to install the python environment and the prerequisite packages, because of the convenient managenment and default [performance setting with numpy/scipy](http://markus-beuckelmann.de/blog/boosting-numpy-blas.html) and [pyresample](https://pyresample.readthedocs.io/en/latest/installation.html#using-pykdtree).
 
 #### Installing via conda ####
 
@@ -128,7 +128,9 @@ sudo -H /opt/local/bin/pip install git+https://github.com/fhs/pyhdf.git
 
 + Check [Earthdef/PyAPS](http://earthdef.caltech.edu/projects/pyaps/wiki/Main#) for accounts setup information for ERA-Interim and MERRA.
 
-+ Check [pyaps3](https://github.com/yunjunz/pyaps3) for account setup for ERA-5 and run `pyaps3/examples/TestECMWF.ipynb` to test.
++ Check [pyaps3](https://github.com/yunjunz/pyaps3) for account setup for ERA-5. Make sure that you:
+  - accept the data license in the Terms of use on ECMWF website and 
+  - run `pyaps3/examples/TestECMWF.ipynb` to test the data downloading and running.
 
 + If you defined an environment variable named `WEATHER_DIR` to contain the path to a
 directory, MintPy applications will download the GAM files into the indicated directory. Also MintPy

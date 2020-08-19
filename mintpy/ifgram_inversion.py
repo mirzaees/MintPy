@@ -311,7 +311,7 @@ def estimate_timeseries(A, B, tbase_diff, ifgram, weight_sqrt=None, min_norm_vel
     Parameters: A                 - 2D np.array in size of (num_ifgram, num_date-1)
                 B                 - 2D np.array in size of (num_ifgram, num_date-1),
                                     design matrix B, each row represents differential temporal
-                                    baseline history between master and slave date of one interferogram
+                                    baseline history between reference and secondary date of one interferogram
                 tbase_diff        - 2D np.array in size of (num_date-1, 1),
                                     differential temporal baseline history
                 ifgram            - 2D np.array in size of (num_ifgram, num_pixel),
@@ -410,13 +410,14 @@ def calc_temporal_coherence(ifgram, G, X):
     Returns:    temp_coh - 1D np.array in size of (num_pixel), temporal coherence
     """
 
-    num_inv_obs = G.shape[0]
-    num_pixel = ifgram.shape[1]
+    num_ifgram, num_pixel = ifgram.shape
     temp_coh = np.zeros(num_pixel, dtype=np.float32)
 
-    chunk_size = 1000
+    # chunk_size as the number of pixels
+    chunk_size = int(ut.round_to_1(2e5 / num_ifgram))
     if num_pixel > chunk_size:
         num_chunk = int(np.ceil(num_pixel / chunk_size))
+        num_chunk_step = int(ut.round_to_1(num_chunk / 5))
         print(('calcualting temporal coherence in chunks of {} pixels'
                ': {} chunks in total ...').format(chunk_size, num_chunk))
 
@@ -428,10 +429,10 @@ def calc_temporal_coherence(ifgram, G, X):
             ifgram_diff = ifgram[:, c0:c1] - np.dot(G, X[:, c0:c1])
 
             # calc temporal coherence
-            temp_coh[c0:c1] = np.abs(np.sum(np.exp(1j*ifgram_diff), axis=0)) / num_inv_obs
+            temp_coh[c0:c1] = np.abs(np.sum(np.exp(1j*ifgram_diff), axis=0)) / num_ifgram
 
             # print out message
-            if (i+1) % 20 == 0:
+            if (i+1) % num_chunk_step == 0:
                 print('chunk {} / {}'.format(i+1, num_chunk))
 
     else:
@@ -439,7 +440,7 @@ def calc_temporal_coherence(ifgram, G, X):
         ifgram_diff = ifgram - np.dot(G, X)
 
         # calc temporal coherence
-        temp_coh = np.abs(np.sum(np.exp(1j*ifgram_diff), axis=0)) / num_inv_obs
+        temp_coh = np.abs(np.sum(np.exp(1j*ifgram_diff), axis=0)) / num_ifgram
 
     return temp_coh
 
@@ -644,13 +645,22 @@ def calc_weight(stack_obj, box, weight_func='var', dropIfgram=True, chunk_size=1
     """Read coherence and calculate weight from it, chunk by chunk to save memory
     """
 
+    print('calculating weight from spatial coherence ...')
+
     # read coherence
     weight = read_coherence(stack_obj, box=box, dropIfgram=dropIfgram)
     num_pixel = weight.shape[1]
 
-    # convert coherence to weight chunk-by-chunk to save memory
-    L = int(stack_obj.metadata['ALOOKS']) * int(stack_obj.metadata['RLOOKS'])
+    if 'NCORRLOOKS' in stack_obj.metadata.keys():
+        L = np.rint(float(stack_obj.metadata['NCORRLOOKS'])).astype(np.int16)
+    else:
+        # use the typical ratio of resolution vs pixel size of Sentinel-1 IW mode
+        L = int(stack_obj.metadata['ALOOKS']) * int(stack_obj.metadata['RLOOKS'])
+        L = np.rint(L / 1.94)
+    # make sure L >= 1
+    L = max(L, 1)
 
+    # convert coherence to weight chunk-by-chunk to save memory
     num_chunk = int(np.ceil(num_pixel / chunk_size))
     print(('convert coherence to weight in chunks of {c} pixels'
            ': {n} chunks in total ...').format(c=chunk_size, n=num_chunk))
@@ -719,7 +729,7 @@ def ifgram_inversion_patch(ifgram_file, box=None, ref_phase=None, obs_ds_name='u
         num_col = stack_obj.width
     num_pixel = num_row * num_col
 
-    # get tbase_diff
+    # get tbase_diff in the unit of year
     date_list = stack_obj.get_date_list(dropIfgram=True)
     num_date = len(date_list)
     tbase = np.array(ptime.date_list2tbase(date_list)[0], np.float32) / 365.25
@@ -815,7 +825,7 @@ def ifgram_inversion_patch(ifgram_file, box=None, ref_phase=None, obs_ds_name='u
         #ts_std = ts_std.reshape(num_date, num_row, num_col)
         temp_coh = temp_coh.reshape(num_row, num_col)
         num_inv_ifg = num_inv_ifg.reshape(num_row, num_col)
-        return ts, temp_coh, num_inv_ifg
+        return ts, temp_coh, num_inv_ifg, box
 
     # 2.2 un-weighted inversion (classic SBAS)
     if weight_func in ['no', 'sbas']:
@@ -981,10 +991,11 @@ def ifgram_inversion(inps=None):
         meta[key_prefix+key] = str(vars(inps)[key])
 
     # 2.2 instantiate time-series
+    date_dtype = np.dtype('S{}'.format(len(date_list[0])))
     dsNameDict = {
-        "date"       : (np.dtype('S8'), (num_date,)),
-        "bperp"      : (np.float32,     (num_date,)),
-        "timeseries" : (np.float32,     (num_date, length, width)),
+        "date"       : (date_dtype, (num_date,)),
+        "bperp"      : (np.float32, (num_date,)),
+        "timeseries" : (np.float32, (num_date, length, width)),
     }
 
     meta['FILE_TYPE'] = 'timeseries'

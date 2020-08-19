@@ -10,8 +10,11 @@
 import os
 import sys
 import time
+import shutil
 import argparse
 import subprocess
+import tarfile
+
 
 CMAP_DICT = {
     'FernandinaSenDT128' : 'jet',
@@ -20,9 +23,9 @@ CMAP_DICT = {
 }
 
 URL_LIST = [
-    'https://zenodo.org/record/3635245/files/FernandinaSenDT128.tar.xz',
-    'https://zenodo.org/record/3635258/files/WellsEnvD2T399.tar.xz',
-    'https://zenodo.org/record/3635262/files/KujuAlosAT422F650.tar.xz',
+    'https://zenodo.org/record/3952953/files/FernandinaSenDT128.tar.xz',
+    'https://zenodo.org/record/3952950/files/WellsEnvD2T399.tar.xz',
+    'https://zenodo.org/record/3952917/files/KujuAlosAT422F650.tar.xz',
 ]
 
 PROJ_NAME_LIST = [os.path.basename(url).split('.tar.xz')[0] for url in URL_LIST]
@@ -97,7 +100,8 @@ def test_dataset(dset_name, test_dir, fresh_start=True, test_pyaps=False):
         cmd = 'wget {}'.format(dset_url)
         print(cmd)
         os.system(cmd)
-    print('tar file exists, skip re-downloading.')
+    else:
+        print('tar file exists, skip re-downloading.')
 
     # uncompress tar file
     if not fresh_start and os.path.isdir(dset_name):
@@ -105,15 +109,14 @@ def test_dataset(dset_name, test_dir, fresh_start=True, test_pyaps=False):
     else:
         # remove existing directory
         if os.path.isdir(dset_name):
-            cmd = 'rm -r {}'.format(dset_name)
-            print('removing existing project directory')
-            print(cmd)
-            os.system(cmd)
+            print('removing existing project directory: {}'.format(dset_name))
+            shutil.rmtree(dset_name)
 
         # uncompress tar file
-        cmd = 'tar -xJf {}'.format(tar_file)
-        print(cmd)
-        os.system(cmd)
+        print('extract content from tar file: {}'.format(tar_file))
+        tar = tarfile.open(tar_file)
+        tar.extractall()
+        tar.close()
 
     # set working directory
     work_dir = os.path.join(test_dir, dset_name, 'mintpy')
@@ -122,9 +125,8 @@ def test_dataset(dset_name, test_dir, fresh_start=True, test_pyaps=False):
 
     # remove pyaps existing products or not
     if test_pyaps:
-        cmd = 'rm ./inputs/ERA5.h5'
-        os.system(cmd)
         print('remove existing tropospheric delay file: ./inputs/ERA5.h5')
+        os.remove('./inputs/ERA5.h5')
 
     # runing smallbaselineApp
     cmd = 'smallbaselineApp.py {}'.format(template_file)

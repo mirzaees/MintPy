@@ -62,11 +62,6 @@ EXAMPLE = """example:
   view.py geo_velocity_msk.h5 velocity --show-gps --gps-comp enu2los --ref-gps GV01
   view.py geo_timeseries_ERA5_ramp_demErr.h5 20180619 --ref-date 20141213 --show-gps --gps-comp enu2los --ref-gps GV01
 
-  # Custom colormap
-  # https://mintpy.readthedocs.io/en/latest/resources/colormaps/
-  view.py velocity.h5 velocity -c temporature_r
-  view.py geometryRadar.h5 height   -c DEM_print
-
   # Save and Output
   view.py velocity.h5 --save
   view.py velocity.h5 --nodisplay
@@ -295,7 +290,7 @@ def update_inps_with_file_metadata(inps, metadata):
         inps.ref_lalo = None
 
     # Points of interest
-    inps = pp.read_point2inps(inps, coord)
+    inps = pp.read_pts2inps(inps, coord)
 
     # Unit and Wrap
     inps.disp_unit, inps.wrap = pp.check_disp_unit_and_wrap(metadata,
