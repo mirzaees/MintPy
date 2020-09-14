@@ -397,7 +397,7 @@ def read_binary_file(fname, datasetName=None, box=None, xstep=1, ystep=1):
 
         # data structure - file specific based on file extension
         data_type = 'float32'
-        num_band = 1        
+        num_band = 1
 
         if fext in ['.unw', '.cor', '.hgt', '.msk']:
             num_band = 2
@@ -796,7 +796,7 @@ def read_attribute(fname, datasetName=None, standardize=True, metafile_ext=None)
             'cfloat': 'complex64',
         }
         data_type = atr.get('DATA_TYPE', 'none').lower()
-        if data_type is not 'none' and data_type in dataTypeDict.keys():
+        if data_type != 'none' and data_type in dataTypeDict.keys():
             atr['DATA_TYPE'] = dataTypeDict[data_type]
 
     # UNIT
@@ -1245,7 +1245,7 @@ def read_binary(fname, shape, box=None, data_type='float32', byte_order='l',
         else:
             raise ValueError('unrecognized complex band:', cpx_band)
 
-    # skipping/multilooking 
+    # skipping/multilooking
     if xstep * ystep > 1:
         data = data[int(ystep/2)::ystep,
                     int(xstep/2)::xstep]

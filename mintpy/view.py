@@ -300,11 +300,17 @@ def update_inps_with_file_metadata(inps, metadata):
                                                             print_msg=inps.print_msg)
 
     # Map info - coordinate unit and map projection
+    # Use cartopy GeoAxes instance if input data is:
+    # 1. geocoded in the unit of degrees AND 
+    # 2. displayed in geo-coordinates
+    # to support:
+    # 1. fancy lat/lon label
+    # 2. coastline
     inps.coord_unit = metadata.get('Y_UNIT', 'degrees').lower()
     if (inps.geo_box
             and inps.fig_coord == 'geo'
             and inps.coord_unit.startswith('deg')
-            and inps.lalo_label):
+            and (inps.lalo_label or inps.coastline)):
         inps.proj_obj = eval('ccrs.{}()'.format(inps.map_projection))
     else:
         inps.proj_obj = None
@@ -347,7 +353,7 @@ def update_inps_with_file_metadata(inps, metadata):
 
 ##################################################################################################
 def update_data_with_plot_inps(data, metadata, inps):
-    # Seed Point
+    # 1. spatial referencing with respect to the seed point
     if inps.ref_yx:   # and inps.ref_yx != [int(metadata['REF_Y']), int(metadata['REF_X'])]:
         try:
             ref_y = inps.ref_yx[0] - inps.pix_box[1]
@@ -363,7 +369,7 @@ def update_data_with_plot_inps(data, metadata, inps):
     else:
         inps.ref_yx = None
 
-    # Convert data to display unit and wrap
+    # 2. scale data based on the display unit and re-wrap
     (data,
      inps.disp_unit,
      inps.disp_scale,
@@ -376,7 +382,7 @@ def update_data_with_plot_inps(data, metadata, inps):
     if inps.wrap:
         inps.vlim = inps.wrap_range
 
-    # 1.6 Min / Max - Data/Display
+    # 3. update display min/max
     inps.dlim = [np.nanmin(data), np.nanmax(data)]
     if not inps.vlim: # and data.ndim < 3:
         inps.vlim = [np.nanmin(data), np.nanmax(data)]
@@ -435,7 +441,7 @@ def plot_slice(ax, data, metadata, inps=None):
             vprint('map projection: {}'.format(inps.map_projection))
 
             # Draw coastline using cartopy resolution parameters
-            if inps.coastline != "no":
+            if inps.coastline:
                 vprint('draw coast line with resolution: {}'.format(inps.coastline))
                 ax.coastlines(resolution=inps.coastline)
 
@@ -915,8 +921,9 @@ def update_figure_setting(inps):
 def read_data4figure(i_start, i_end, inps, metadata):
     """Read multiple datasets for one figure into 3D matrix based on i_start/end"""
     data = np.zeros((i_end - i_start,
-                     int((inps.pix_box[3] - inps.pix_box[1]) / inps.multilook_num),
-                     int((inps.pix_box[2] - inps.pix_box[0]) / inps.multilook_num)), dtype=np.float32)
+                     np.rint((inps.pix_box[3] - inps.pix_box[1]) / inps.multilook_num - 1e-4).astype(int),
+                     np.rint((inps.pix_box[2] - inps.pix_box[0]) / inps.multilook_num - 1e-4).astype(int),
+                    ), dtype=np.float32)
 
     # fast reading for single dataset type
     if (len(inps.dsetFamilyList) == 1
@@ -969,27 +976,24 @@ def read_data4figure(i_start, i_end, inps, metadata):
                                  ystep=inps.multilook_num)[0]
         data -= ref_data
 
-    # v/dlim, adjust data if all subplots share the same unit
-    # This could be:
+    # check if all subplots share the same data unit, they could have/be:
     # 1) the same type OR
     # 2) velocity or timeseries OR
     # 3) horizontal/vertical output from asc_desc2horz_vert.py
     # 4) data/model output from load_gbis.py OR
     # 5) binary files with multiple undefined datasets, as band1, band2, etc.
-    if (len(inps.dsetFamilyList) == 1 
+    if (len(inps.dsetFamilyList) == 1
             or inps.key in ['velocity', 'timeseries', 'inversion']
             or all(d in inps.dsetFamilyList for d in ['horizontal', 'vertical'])
             or inps.dsetFamilyList == ['data','model','residual']
             or inps.dsetFamilyList == ['band{}'.format(i+1) for i in range(len(inps.dsetFamilyList))]):
-        data, inps = update_data_with_plot_inps(data, metadata, inps)
+        same_unit4all_subplots = True
+    else:
+        same_unit4all_subplots = False
 
-        if (not inps.vlim
-                and not (inps.dsetFamilyList[0].startswith('unwrap') and not inps.file_ref_yx)
-                and inps.dsetFamilyList[0] not in ['bperp']):
-            data_mli = multilook_data(data, 10, 10)
-            inps.vlim = [np.nanmin(data_mli), np.nanmax(data_mli)]
-            del data_mli
-    inps.dlim = [np.nanmin(data), np.nanmax(data)]
+    # adjust data due to spatial referencing and unit related scaling
+    if same_unit4all_subplots:
+        data, inps = update_data_with_plot_inps(data, metadata, inps)
 
     # mask
     if inps.msk is not None:
@@ -1000,6 +1004,17 @@ def read_data4figure(i_start, i_end, inps, metadata):
     if inps.zero_mask:
         vprint('masking pixels with zero value')
         data = np.ma.masked_where(data == 0., data)
+
+    # update display min/max
+    if (same_unit4all_subplots 
+            and all(arg not in sys.argv for arg in ['-v', '--vlim'])
+            and not (inps.dsetFamilyList[0].startswith('unwrap') and not inps.file_ref_yx)
+            and inps.dsetFamilyList[0] not in ['bperp']):
+        data_mli = multilook_data(data, 10, 10)
+        inps.vlim = [np.nanmin(data_mli), np.nanmax(data_mli)]
+        del data_mli
+    inps.dlim = [np.nanmin(data), np.nanmax(data)]
+
     return data
 
 

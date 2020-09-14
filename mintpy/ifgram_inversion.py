@@ -82,7 +82,7 @@ def create_parser():
                         help='Output file name. (default: %(default)s).')
     parser.add_argument('--ref-date', dest='ref_date', help='Reference date, first date by default.')
     parser.add_argument('--skip-reference', dest='skip_ref', action='store_true',
-                        help='Skip checking reference pixel value, for simulation testing.')
+                        help='[for offset and testing] do not apply spatial referencing.')
 
     # solver
     solver = parser.add_argument_group('solver', 'solver for the network inversion problem')
@@ -1002,8 +1002,7 @@ def ifgram_inversion(inps=None):
     meta['UNIT'] = 'm'
     meta['REF_DATE'] = date_list[0]
 
-    ts_obj = timeseries(inps.tsFile)
-    ts_obj.layout_hdf5(dsNameDict, meta)
+    writefile.layout_hdf5(inps.tsFile, dsNameDict, meta)
 
     # write date time-series
     date_list_utf8 = [dt.encode('utf-8') for dt in date_list]
