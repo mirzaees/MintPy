@@ -14,8 +14,9 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 from matplotlib.widgets import Slider
+
 from mintpy.objects import timeseries, giantTimeseries, HDFEOS
-from mintpy.utils import readfile, ptime, plot as pp, utils as ut
+from mintpy.utils import arg_group, readfile, ptime, plot as pp, utils as ut
 from mintpy.multilook import multilook_data
 from mintpy import subset, view
 
@@ -40,7 +41,7 @@ def create_parser():
     parser = argparse.ArgumentParser(description='Interactive time-series viewer',
                                      formatter_class=argparse.RawTextHelpFormatter,
                                      epilog=EXAMPLE)
-    parser.add_argument('timeseries_file', nargs='+',
+    parser.add_argument('file', nargs='+',
                         help='time-series file to display\n'
                              'i.e.: timeseries_ERA5_ramp_demErr.h5 (MintPy)\n'
                              '      LS-PARAMS.h5 (GIAnT)\n'
@@ -86,15 +87,15 @@ def create_parser():
     parser.add_argument('--noverbose', dest='print_msg', action='store_false',
                         help='Disable the verbose message printing.')
 
-    parser = pp.add_data_disp_argument(parser)
-    parser = pp.add_dem_argument(parser)
-    parser = pp.add_figure_argument(parser)
-    parser = pp.add_gps_argument(parser)
-    parser = pp.add_mask_argument(parser)
-    parser = pp.add_map_argument(parser)
-    parser = pp.add_reference_argument(parser)
-    parser = pp.add_save_argument(parser)
-    parser = pp.add_subset_argument(parser)
+    parser = arg_group.add_data_disp_argument(parser)
+    parser = arg_group.add_dem_argument(parser)
+    parser = arg_group.add_figure_argument(parser)
+    parser = arg_group.add_gps_argument(parser)
+    parser = arg_group.add_mask_argument(parser)
+    parser = arg_group.add_map_argument(parser)
+    parser = arg_group.add_reference_argument(parser)
+    parser = arg_group.add_save_argument(parser)
+    parser = arg_group.add_subset_argument(parser)
 
     return parser
 
@@ -108,7 +109,7 @@ def cmd_line_parse(iargs=None):
         raise NotImplementedError(msg)
 
     if inps.file_label:
-        if len(inps.file_label) != len(inps.timeseries_file):
+        if len(inps.file_label) != len(inps.file):
             raise Exception('input number of labels != number of files.')
 
     if (not inps.disp_fig or inps.outfile) and not inps.save_fig:
@@ -139,7 +140,7 @@ def cmd_line_parse(iargs=None):
 ###########################################################################################
 def read_init_info(inps):
     # Time Series Info
-    ts_file0 = inps.timeseries_file[0]
+    ts_file0 = inps.file[0]
     atr = readfile.read_attribute(ts_file0)
     inps.key = atr['FILE_TYPE']
     if inps.key == 'timeseries':
@@ -153,7 +154,7 @@ def read_init_info(inps):
     obj.open(print_msg=inps.print_msg)
 
     if not inps.file_label:
-        inps.file_label = [str(i) for i in list(range(len(inps.timeseries_file)))]
+        inps.file_label = [str(i) for i in list(range(len(inps.file)))]
 
     # default mask file
     if not inps.mask_file and 'masked' not in ts_file0:
@@ -245,7 +246,7 @@ def read_init_info(inps):
         if inps.ref_lalo[1] > 180.:
             inps.ref_lalo[1] -= 360.
         inps.ref_yx = inps.coord.geo2radar(inps.ref_lalo[0], inps.ref_lalo[1], print_msg=False)[0:2]
-    if not inps.ref_yx:
+    if not inps.ref_yx and 'REF_Y' in atr.keys():
         inps.ref_yx = [int(atr['REF_Y']), int(atr['REF_X'])]
 
     # Initial Pixel Coord
@@ -319,7 +320,7 @@ def read_timeseries_data(inps):
     """
     # read list of 3D time-series
     ts_data = []
-    for fname in inps.timeseries_file:
+    for fname in inps.file:
         vprint('reading timeseries from file {} ...'.format(fname))
         data, atr = readfile.read(fname, datasetName=inps.date_list, box=inps.pix_box)
         try:
@@ -341,7 +342,7 @@ def read_timeseries_data(inps):
 
     # Mask file: input mask file + non-zero ts pixels - ref_point
     mask = np.ones(ts_data[0].shape[-2:], np.bool_)
-    msk = pp.read_mask(inps.timeseries_file[0],
+    msk = pp.read_mask(inps.file[0],
                        mask_file=inps.mask_file,
                        datasetName='displacement',
                        box=inps.pix_box,
@@ -381,7 +382,7 @@ def read_timeseries_data(inps):
     vprint('display range: {} {}'.format(inps.vlim, inps.disp_unit))
 
     # default ylim
-    num_file = len(inps.timeseries_file)
+    num_file = len(inps.file)
     if not inps.ylim:
         ts_data_mli = multilook_data(np.squeeze(ts_data[-1]), 4, 4)
         if inps.zero_first:
@@ -497,7 +498,7 @@ def save_ts_plot(yx, fig_img, fig_pts, d_ts, inps):
 
     # TXT - point time-series
     outName = '{}_ts.txt'.format(inps.outfile_base)
-    header_info = 'timeseries_file={}\n'.format(inps.timeseries_file)
+    header_info = 'time-series file={}\n'.format(inps.file)
     header_info += '{}\n'.format(_get_ts_title(yx[0], yx[1], inps.coord))
     header_info += 'reference pixel: y={}, x={}\n'.format(inps.ref_yx[0], inps.ref_yx[1])
     header_info += 'reference date: {}\n'.format(inps.date_list[inps.ref_idx])

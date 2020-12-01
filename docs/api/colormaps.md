@@ -4,7 +4,7 @@ MintPy support the following colormaps:
 
 + [Matplotlib colormaps](https://matplotlib.org/3.1.0/tutorials/colors/colormaps.html)
 + Custom colormaps: `cmy` and `dismph`
-+ Custom colormaps in **.cpt** (color palette tables) format. To add your own colormap, drop the corresponding .cpt file in `$MINTPY/docs/resources/colormaps`.
++ Custom colormaps in **.cpt** (color palette tables) format. To add your own colormap, drop the corresponding .cpt file in `$MINTPY/mintpy/data/colormaps`.
 
 We recommend to use cyclic colormap `cmy` for wrapped phase/displacement measurement.
 
@@ -63,5 +63,5 @@ The following colormaps is included by default:
 + More at [Scientific Color-Maps](http://www.fabiocrameri.ch/colourmaps.php) ([Crameri, 2018](https://doi.org/10.5194/gmd-11-2541-2018))
 
 <p align="left">
-  <img width="600" src="http://www.fabiocrameri.ch/resources/ScientificColourMaps_FabioCrameriCompact.png">
+  <img src="http://www.fabiocrameri.ch/resources/ScientificColourMaps_FabioCrameri.png">
 </p>

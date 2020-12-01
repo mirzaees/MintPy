@@ -80,15 +80,11 @@ Notes for data access:
   For ERA-5 from CDS, you need to agree to the Terms of Use of every datasets that you intend to download.
 """
 
-WEATHER_DIR_DEMO = """--weather-dir ~/atmosphere
+WEATHER_DIR_DEMO = """--weather-dir ~/data/aux
 atmosphere/
     /ERA5
         ERA5_N20_N40_E120_E140_20060624_14.grb
         ERA5_N20_N40_E120_E140_20060924_14.grb
-        ...
-    /ECMWF
-        ERA-Int_20030329_06.grb
-        ERA-Int_20030503_06.grb
         ...
     /MERRA
         merra-20110126-06.nc4
@@ -118,7 +114,7 @@ def create_parser():
     delay = parser.add_argument_group('delay calculation')
     delay.add_argument('-m', '--model', '-s', dest='tropo_model', default='ERA5',
                        choices={'ERA5'},
-                       #choices={'ERA5', 'ERAINT', 'MERRA', 'NARR'},
+                       #choices={'ERA5', 'MERRA', 'NARR'},
                        help='source of the atmospheric model (default: %(default)s).')
     delay.add_argument('--delay', dest='delay_type', default='comb', choices={'comb', 'dry', 'wet'},
                        help='Delay type to calculate, comb contains both wet and dry delays (default: %(default)s).')
@@ -597,8 +593,9 @@ def calculate_delay_timeseries(inps):
 
     # check existing tropo delay file
     if (ut.run_or_skip(out_file=inps.tropo_file, in_file=inps.grib_files, print_msg=False) == 'skip'
-            and get_dataset_size(inps.tropo_file) == get_dataset_size(inps.geom_file)):
-        print('{} file exists and is newer than all GRIB files, skip updating.'.format(inps.tropo_file))
+            and get_dataset_size(inps.tropo_file) == get_dataset_size(inps.geom_file)
+            and all(i in timeseries(inps.tropo_file).get_date_list() for i in inps.date_list)):
+        print('{} file exists, is newer than all GRIB files and contains all dates, skip updating'.format(inps.tropo_file))
         return
 
     # prepare geometry data
@@ -664,7 +661,7 @@ def correct_timeseries(dis_file, tropo_file, cor_dis_file):
     print('correcting relative delay for input time-series using diff.py')
     from mintpy import diff
 
-    iargs = [dis_file, tropo_file, '-o', cor_dis_file]
+    iargs = [dis_file, tropo_file, '-o', cor_dis_file, '--force']
     print('diff.py', ' '.join(iargs))
     diff.main(iargs)
     return cor_dis_file

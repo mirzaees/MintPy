@@ -102,7 +102,7 @@ def cmd_line_parse(iargs=None):
 
     # -v (print software version)
     if inps.version:
-        print(mintpy.version.description)
+        print(mintpy.version.release_description)
         sys.exit(0)
 
     # check all input template files
@@ -166,7 +166,7 @@ def read_inps2run_steps(inps, step_list=STEP_LIST):
     if len(run_steps) > 0:
         # for single step - compact version info
         if len(run_steps) == 1:
-            print(mintpy.version.description)
+            print(mintpy.version.release_description)
         else:
             print(mintpy.version.logo)
 
@@ -235,7 +235,7 @@ class TimeSeriesAnalysis:
         self._read_template()
 
         # 4. Copy the plot shell file
-        sh_file = os.path.join(os.path.dirname(__file__), '../sh/plot_smallbaselineApp.sh')
+        sh_file = os.path.join(os.path.dirname(__file__), 'sh/plot_smallbaselineApp.sh')
 
         def grab_latest_update_date(fname, prefix='# Latest update:'):
             try:
@@ -342,25 +342,18 @@ class TimeSeriesAnalysis:
         self._copy_aux_file()
 
         # 2) loading data
-        stack_processor = self.template['mintpy.load.processor'].lower()
-        if stack_processor == 'aria':
-            from mintpy import prep_aria
-            iargs = ['--template', self.templateFile, '--update']
-            prep_aria.main(iargs)
+        # compose list of input arguments
+        # instead of using command line then split
+        # to support path with whitespace
+        iargs = ['--template', self.templateFile]
+        if self.customTemplateFile:
+            iargs += [self.customTemplateFile]
+        if self.projectName:
+            iargs += ['--project', self.projectName]
 
-        else:
-            # compose list of input arguments
-            # instead of using command line then split
-            # to support path with whitespace
-            iargs = ['--template', self.templateFile]
-            if self.customTemplateFile:
-                iargs += [self.customTemplateFile]
-            if self.projectName:
-                iargs += ['--project', self.projectName]
-
-            # run command line
-            print('load_data.py', ' '.join(iargs))
-            mintpy.load_data.main(iargs)
+        # run command line
+        print('\nload_data.py', ' '.join(iargs))
+        mintpy.load_data.main(iargs)
 
         # come back to working directory
         os.chdir(self.workDir)
@@ -418,9 +411,9 @@ class TimeSeriesAnalysis:
         """Modify network of interferograms before the network inversion."""
         # check the existence of ifgramStack.h5
         stack_file, geom_file = ut.check_loaded_dataset(self.workDir, print_msg=False)[1:3]
-        coh_txt = '{}_coherence_spatialAvg.txt'.format(os.path.splitext(os.path.basename(stack_file))[0])
+        coh_txt = 'coherenceSpatialAvg.txt'
         try:
-            net_fig = [i for i in ['Network.pdf', 'pic/Network.pdf'] if os.path.isfile(i)][0]
+            net_fig = [i for i in ['network.pdf', 'pic/network.pdf'] if os.path.isfile(i)][0]
         except:
             net_fig = None
 
@@ -442,24 +435,28 @@ class TimeSeriesAnalysis:
 
         # 2) modify network
         iargs = [stack_file, '-t', self.templateFile]
-        print('modify_network.py', ' '.join(iargs))
+        print('\nmodify_network.py', ' '.join(iargs))
         mintpy.modify_network.main(iargs)
 
         # 3) plot network
+        iargs = [stack_file, '-t', self.templateFile, '--nodisplay']
+
+        dsNames = readfile.get_dataset_list(stack_file)
+        if any('phase' in i.lower() for i in dsNames):
+            iargs += ['-d', 'coherence', '-v', '0.2', '1.0']
+        elif any('offset' in i.lower() for i in dsNames):
+            iargs += ['-d', 'offsetSNR', '-v', '0', '20']
+
+        print('\nplot_network.py', ' '.join(iargs))
+
+        # run
         if self.template['mintpy.plot'] and plot:
-            iargs = [stack_file, '-t', self.templateFile, '--nodisplay']
-
-            dsNames = readfile.get_dataset_list(stack_file)
-            if any('phase' in i.lower() for i in dsNames):
-                iargs += ['-d', 'coherence', '-v', '0.2', '1.0']
-            elif any('offset' in i.lower() for i in dsNames):
-                iargs += ['-d', 'offsetSNR', '-v', '0', '20']
-
-            print('\nplot_network.py', ' '.join(iargs))
             if ut.run_or_skip(out_file=net_fig,
                               in_file=[stack_file, coh_txt, self.templateFile],
                               check_readable=False) == 'run':
                 mintpy.plot_network.main(iargs)
+        else:
+            print('mintpy.plot is turned OFF, skip plotting network.')
         return
 
 
@@ -501,7 +498,7 @@ class TimeSeriesAnalysis:
         coh_file = 'avgSpatialCoh.h5'
 
         iargs = [stack_file, '-t', self.templateFile, '-c', coh_file]
-        print('reference_point.py', ' '.join(iargs))
+        print('\nreference_point.py', ' '.join(iargs))
         mintpy.reference_point.main(iargs)
         return
 
@@ -517,13 +514,13 @@ class TimeSeriesAnalysis:
         # 1) stack interferograms
         pha_vel_file = 'avgPhaseVelocity.h5'
         iargs = [stack_file, '--dataset', 'unwrapPhase', '-o', pha_vel_file, '--update']
-        print('temporal_average.py', ' '.join(iargs))
+        print('\ntemporal_average.py', ' '.join(iargs))
         mintpy.temporal_average.main(iargs)
 
         # 2) calculate the number of interferogram triplets with non-zero integer ambiguity
         water_mask_file = 'waterMask.h5'
         iargs = [stack_file, '--water-mask', water_mask_file, '--action', 'calculate', '--update']
-        print('unwrap_error_phase_closure.py', ' '.join(iargs))
+        print('\nunwrap_error_phase_closure.py', ' '.join(iargs))
         mintpy.unwrap_error_phase_closure.main(iargs)
         return
 
@@ -543,22 +540,22 @@ class TimeSeriesAnalysis:
         iargs_closure = iargs_bridge + ['--cc-mask', mask_file]
 
         if method == 'bridging':
-            print('unwrap_error_bridging.py', ' '.join(iargs_bridge))
+            print('\nunwrap_error_bridging.py', ' '.join(iargs_bridge))
             mintpy.unwrap_error_bridging.main(iargs_bridge)
 
         elif method == 'phase_closure':
-            print('unwrap_error_phase_closure.py', ' '.join(iargs_closure))
+            print('\nunwrap_error_phase_closure.py', ' '.join(iargs_closure))
             mintpy.unwrap_error_phase_closure.main(iargs_closure)
 
         elif method == 'bridging+phase_closure':
             iargs_bridge += ['-i', 'unwrapPhase',
                              '-o', 'unwrapPhase_bridging']
-            print('unwrap_error_bridging.py', ' '.join(iargs_bridge))
+            print('\nunwrap_error_bridging.py', ' '.join(iargs_bridge))
             mintpy.unwrap_error_bridging.main(iargs_bridge)
 
             iargs_closure += ['-i', 'unwrapPhase_bridging',
                               '-o', 'unwrapPhase_bridging_phaseClosure']
-            print('unwrap_error_phase_closure.py', ' '.join(iargs_closure))
+            print('\nunwrap_error_phase_closure.py', ' '.join(iargs_closure))
             mintpy.unwrap_error_phase_closure.main(iargs_closure)
 
         else:
@@ -576,7 +573,7 @@ class TimeSeriesAnalysis:
 
         # 1) invert ifgramStack for time-series
         iargs = [stack_file, '-t', self.templateFile, '--update']
-        print('ifgram_inversion.py', ' '.join(iargs))
+        print('\nifgram_inversion.py', ' '.join(iargs))
         mintpy.ifgram_inversion.main(iargs)
 
         # 2) get reliable pixel mask: maskTempCoh.h5
@@ -597,7 +594,7 @@ class TimeSeriesAnalysis:
         if (self.template['mintpy.networkInversion.shadowMask'] is True 
                 and 'shadowMask' in readfile.get_dataset_list(geom_file)):
             iargs += ['--base', geom_file, '--base-dataset', 'shadowMask', '--base-value', '1']
-        print('generate_mask.py', ' '.join(iargs))
+        print('\ngenerate_mask.py', ' '.join(iargs))
 
         # update mode: run only if:
         # 1) output file exists and newer than input file, AND
@@ -666,6 +663,9 @@ class TimeSeriesAnalysis:
                     if method == 'height_correlation':
                         fname1 = '{}_tropHgt.h5'.format(os.path.splitext(fname0)[0])
 
+                    elif method == 'gacos':
+                        fname1 = '{}_GACOS.h5'.format(os.path.splitext(fname0)[0])
+
                     elif method == 'pyaps':
                         fname1 = '{}_{}.h5'.format(os.path.splitext(fname0)[0], model)
 
@@ -726,7 +726,7 @@ class TimeSeriesAnalysis:
         out_file = fnames['output']
         if in_file != out_file:
             iargs = [in_file, geom_file, '-o', out_file]
-            print('local_oscilator_drift.py', ' '.join(iargs))
+            print('\nlocal_oscilator_drift.py', ' '.join(iargs))
             if ut.run_or_skip(out_file=out_file, in_file=in_file) == 'run':
                 mintpy.local_oscilator_drift.main(iargs)
         else:
@@ -734,8 +734,6 @@ class TimeSeriesAnalysis:
             sat = atr.get('PLATFORM', None)
             print('No local oscillator drift correction is needed for {}.'.format(sat))
         return
-
-
 
     def run_tropospheric_delay_correction(self, step_name):
         """Correct tropospheric delays."""
@@ -767,11 +765,19 @@ class TimeSeriesAnalysis:
                          '-l', tropo_look, 
                          '-t', tropo_min_cor]
                 print('tropospheric delay correction with height-correlation approach')
-                print('tropo_phase_elevation.py', ' '.join(iargs))
+                print('\ntropo_phase_elevation.py', ' '.join(iargs))
                 if ut.run_or_skip(out_file=out_file, in_file=in_file) == 'run':
                     mintpy.tropo_phase_elevation.main(iargs)
 
             # Weather Re-analysis Data (Jolivet et al., 2011;2014)
+            elif method == 'gacos':
+                GACOS_dir = self.template['mintpy.troposphericDelay.gacosDir']
+                iargs = ['-f', in_file, '-l', geom_file, '-o', out_file, '--GACOS-dir', GACOS_dir]
+                print('tropospheric delay correction with gacos approach')
+                print('\ntropo_gacos.py', ' '.join(iargs))
+                if ut.run_or_skip(out_file=out_file, in_file=in_file) == 'run':
+                    mintpy.tropo_gacos.main(iargs)
+
             elif method == 'pyaps':
                 iargs = ['-f', in_file, '--model', tropo_model, '-g', geom_file, '-w', weather_dir]
                 print('Atmospheric correction using Weather Re-analysis dataset (PyAPS, Jolivet et al., 2011)')
@@ -782,12 +788,12 @@ class TimeSeriesAnalysis:
                         iargs = [in_file, tropo_file, '-o', out_file, '--force']
                         print('--------------------------------------------')
                         print('Use existed tropospheric delay file: {}'.format(tropo_file))
-                        print('diff.py', ' '.join(iargs))
+                        print('\ndiff.py', ' '.join(iargs))
                         mintpy.diff.main(iargs)
                     else:
                         if tropo_model in ['ERA5']:
                             from mintpy import tropo_pyaps3
-                            print('tropo_pyaps3.py', ' '.join(iargs))
+                            print('\ntropo_pyaps3.py', ' '.join(iargs))
                             tropo_pyaps3.main(iargs)
                         else:
                             # opt 1 - using tropo_pyaps as python module and call its main function
@@ -817,7 +823,7 @@ class TimeSeriesAnalysis:
         if in_file != out_file:
             print('Remove for each acquisition a phase ramp: {}'.format(method))
             iargs = [in_file, '-s', method, '-m', mask_file, '-o', out_file, '--update']
-            print('remove_ramp.py', ' '.join(iargs))
+            print('\nremove_ramp.py', ' '.join(iargs))
             mintpy.remove_ramp.main(iargs)
         else:
             print('No phase ramp removal.')
@@ -837,7 +843,7 @@ class TimeSeriesAnalysis:
             iargs = [in_file, '-t', self.templateFile, '-o', out_file, '--update']
             if self.template['mintpy.topographicResidual.pixelwiseGeometry']:
                 iargs += ['-g', geom_file]
-            print('dem_error.py', ' '.join(iargs))
+            print('\ndem_error.py', ' '.join(iargs))
             mintpy.dem_error.main(iargs)
 
         else:
@@ -850,7 +856,7 @@ class TimeSeriesAnalysis:
         res_file = 'timeseriesResidual.h5'
         if os.path.isfile(res_file):
             iargs = [res_file, '-t', self.templateFile]
-            print('timeseries_rms.py', ' '.join(iargs))
+            print('\ntimeseries_rms.py', ' '.join(iargs))
             mintpy.timeseries_rms.main(iargs)
         else:
             print('No residual phase file found! Skip residual RMS analysis.')
@@ -864,7 +870,7 @@ class TimeSeriesAnalysis:
             in_files = self.get_timeseries_filename(self.template)[step_name]['input']
             for in_file in in_files:
                 iargs += [in_file]
-            print('reference_date.py', ' '.join(iargs))
+            print('\nreference_date.py', ' '.join(iargs))
             mintpy.reference_date.main(iargs)
         else:
             print('No reference date change.')
@@ -877,7 +883,7 @@ class TimeSeriesAnalysis:
         vel_file = 'velocity.h5'
 
         iargs = [ts_file, '-t', self.templateFile, '-o', vel_file, '--update']
-        print('timeseries2velocity.py', ' '.join(iargs))
+        print('\ntimeseries2velocity.py', ' '.join(iargs))
         mintpy.timeseries2velocity.main(iargs)
 
         # Velocity from estimated tropospheric delays
@@ -888,7 +894,7 @@ class TimeSeriesAnalysis:
             tropo_vel_file = '{}{}.h5'.format(os.path.splitext(vel_file)[0], suffix)
 
             iargs = [tropo_file, '-t', self.templateFile, '-o', tropo_vel_file, '--update']
-            print('timeseries2velocity.py', ' '.join(iargs))
+            print('\ntimeseries2velocity.py', ' '.join(iargs))
             mintpy.timeseries2velocity.main(iargs)
         return
 
@@ -908,7 +914,7 @@ class TimeSeriesAnalysis:
                 iargs = ['-l', lookup_file, '-t', self.templateFile, '--outdir', out_dir, '--update']
                 for in_file in in_files:
                     iargs += [in_file]
-                print('geocode.py', ' '.join(iargs))
+                print('\ngeocode.py', ' '.join(iargs))
                 mintpy.geocode.main(iargs)
 
                 # 2. generate reliable pixel mask in geo coordinate
@@ -922,7 +928,7 @@ class TimeSeriesAnalysis:
                 if (self.template['mintpy.networkInversion.shadowMask'] is True 
                         and 'shadowMask' in readfile.get_dataset_list(geom_file)):
                     iargs += ['--base', geom_file, '--base-dataset', 'shadowMask', '--base-value', '1']
-                print('generate_mask.py', ' '.join(iargs))
+                print('\ngenerate_mask.py', ' '.join(iargs))
 
                 if ut.run_or_skip(out_file=mask_file, in_file=tcoh_file) == 'run':
                     mintpy.generate_mask.main(iargs)
@@ -946,7 +952,7 @@ class TimeSeriesAnalysis:
             # output
             kmz_file = '{}.kmz'.format(os.path.splitext(vel_file)[0])
             iargs = [vel_file, '-o', kmz_file]
-            print('save_kmz.py', ' '.join(iargs))
+            print('\nsave_kmz.py', ' '.join(iargs))
 
             # update mode
             try:
@@ -989,7 +995,7 @@ class TimeSeriesAnalysis:
                      '-m', mask_file,
                      '-g', geom_file, 
                      '-t', self.templateFile]
-            print('save_hdfeos5.py', ' '.join(iargs))
+            print('\nsave_hdfeos5.py', ' '.join(iargs))
 
             # output (check existing file)
             atr = readfile.read_attribute(ts_file)

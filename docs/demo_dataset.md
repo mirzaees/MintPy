@@ -10,7 +10,7 @@ Size: ~750 MB
 wget https://zenodo.org/record/3952953/files/FernandinaSenDT128.tar.xz
 tar -xvJf FernandinaSenDT128.tar.xz
 cd FernandinaSenDT128/mintpy
-smallbaselineApp.py ${MINTPY_HOME}/docs/examples/input_files/FernandinaSenDT128.txt     
+smallbaselineApp.py ${MINTPY_HOME}/mintpy/data/input_files/FernandinaSenDT128.txt     
 ```
 
 <p align="left">
@@ -20,6 +20,27 @@ smallbaselineApp.py ${MINTPY_HOME}/docs/examples/input_files/FernandinaSenDT128.
 Relevant literature:
 
 + Yunjun, Z., H. Fattahi, and F. Amelung (2019), Small baseline InSAR time series analysis: Unwrapping error correction and noise reduction, _Computers & Geosciences, 133,_ 104331, doi:10.1016/j.cageo.2019.104331.
+
+#### Sentinel-1 on San Francisco Bay with ARIA ####
+
+Area: San Francisco Bay, California, USA     
+Data: Sentinel-1 A/B descending track 42 during May 2015 - March 2020 (114 acquisitoins; [Zenodo](https://zenodo.org/record/4265413))    
+Size: ~2.7 GB
+
+```bash
+wget https://zenodo.org/record/4265413/files/SanFranSenDT42.tar.xz
+tar -xvJf SanFranSenDT42.tar.xz
+cd SanFranSenDT42/mintpy
+smallbaselineApp.py ${MINTPY_HOME}/mintpy/data/input_files/SanFranSenDT42.txt     
+```
+
+<p align="left">
+  <img width="650" src="https://yunjunzhang.files.wordpress.com/2020/11/sanfransendt42_transect.jpg">
+</p>
+
+Relevant literature:
+
++ Chaussard, E., R. Bürgmann, H. Fattahi, R. M. Nadeau, T. Taira, C. W. Johnson, and I. Johanson (2015), Potential for larger earthquakes in the East San Francisco Bay Area due to the direct connection between the Hayward and Calaveras Faults, Geophysical Research Letters, 42(8), 2734-2741, doi:10.1002/2015GL063575.
 
 #### Envisat of the 2008 Wells earthquake with Gamma ####
 
@@ -31,7 +52,7 @@ Size: ~280 MB
 wget https://zenodo.org/record/3952950/files/WellsEnvD2T399.tar.xz
 tar -xvJf WellsEnvD2T399.tar.xz
 cd WellsEnvD2T399/mintpy
-smallbaselineApp.py ${MINTPY_HOME}/docs/examples/input_files/WellsEnvD2T399.txt
+smallbaselineApp.py ${MINTPY_HOME}/mintpy/data/input_files/WellsEnvD2T399.txt
 ```
 
 <p align="left">
@@ -41,6 +62,19 @@ smallbaselineApp.py ${MINTPY_HOME}/docs/examples/input_files/WellsEnvD2T399.txt
 Relevant literature:
 
 + Nealy, J. L., H. M. Benz, G. P. Hayes, E. A. Bergman, and W. D. Barnhart (2017), The 2008 Wells, Nevada, Earthquake Sequence: Source Constraints Using Calibrated Multiple‐Event Relocation and InSARThe 2008 Wells, Nevada, Earthquake Sequence: Source Constraints Using Calibrated Multiple‐Event Relocation, _Bulletin of the Seismological Society of America_, 107(3), 1107-1117, doi:10.1785/0120160298.
+
+#### Sentinel-1 on Western Cape, South Africa with SNAP ####
+
+Area: West coast of Western Cape province, South Africa        
+Data: Sentinel-1 ascending track 29 during March - June 2019 (10 acquisitions; [Zenodo](https://zenodo.org/record/4127335))       
+Size: ~560 MB
+
+```bash
+wget https://zenodo.org/record/4127335/files/WCapeSenAT29.tar.xz
+tar -xvJf WCapeSenAT29.tar.xz
+cd WCapeSenAT29
+smallbaselineApp.py ${MINTPY_HOME}/mintpy/data/input_files/WCapeSenAT29.txt
+```
 
 #### ALOS-1 on Kuju with ROI_PAC ####
 
@@ -52,7 +86,7 @@ Size: ~240 MB
 wget https://zenodo.org/record/3952917/files/KujuAlosAT422F650.tar.xz
 tar -xvJf KujuAlosAT422F650.tar.xz
 cd KujuAlosAT422F650/mintpy
-smallbaselineApp.py ${MINTPY_HOME}/docs/examples/input_files/KujuAlosAT422F650.txt     
+smallbaselineApp.py ${MINTPY_HOME}/mintpy/data/input_files/KujuAlosAT422F650.txt     
 ```
 
 <p align="left">

@@ -12,7 +12,7 @@ import os
 import sys
 import re
 import time
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 import h5py
 import numpy as np
 from mintpy.utils import ptime
@@ -66,6 +66,7 @@ ifgramDatasetNames = [
     'connectComponent',
     'wrapPhase',
     'ionoPhase',
+    'magnitude',
     'rangeOffset',
     'azimuthOffset',
     'offsetSNR',
@@ -79,6 +80,7 @@ datasetUnitDict = {
     'connectComponent' : '1',
     'wrapPhase'        : 'radian',
     'ionoPhase'        : 'radian',
+    'magnitude'        : '1',
 
     # offset
     'azimuthOffset' : 'pixel',
@@ -183,7 +185,11 @@ class timeseries:
         # time info
         self.dateFormat = ptime.get_date_str_format(self.dateList[0])
         self.times = np.array([dt.strptime(i, self.dateFormat) for i in self.dateList])
-        self.tbase = np.array([(i.days + i.seconds / (24 * 60 * 60)) 
+        # add hh/mm/ss info to the datetime objects
+        if 'T' not in self.dateFormat or all(i.hour==0 and i.minute==0 for i in self.times):
+            utc_sec = float(self.metadata['CENTER_LINE_UTC'])
+            self.times = np.array([i + timedelta(seconds=utc_sec) for i in self.times])
+        self.tbase = np.array([(i.days + i.seconds / (24 * 60 * 60))
                                for i in (self.times - self.times[self.refIndex])],
                               dtype=np.float32)
 
@@ -262,8 +268,12 @@ class timeseries:
             if box is None:
                 box = [0, 0, self.width, self.length]
 
-            data = ds[dateFlag, box[1]:box[3], box[0]:box[2]]
-            if squeeze:
+            # read
+            data = ds[dateFlag,
+                      box[1]:box[3],
+                      box[0]:box[2]]
+
+            if squeeze and any(i == 1 for i in data.shape):
                 data = np.squeeze(data)
         return data
 
@@ -477,13 +487,19 @@ class timeseries:
 
         def get_design_matrix4polynomial_func(yr_diff, degree):
             """design matrix/function model of linear/polynomial velocity estimation
+
+            The k! denominator makes the estimated polynomial coefficient (c_k) physically meaningful:
+                k=1 makes c_1 the velocity;
+                k=2 makes c_2 the acceleration;
+                k=3 makes c_3 the acceleration rate;
+
             Parameters: yr_diff: time difference from refDate in decimal years
                         degree : polynomial models: 1=linear, 2=quadratic, 3=cubic, etc.
             Returns:    A      : 2D array of poly-coeff. in size of (num_date, degree+1)
             """
             A = np.zeros([len(yr_diff), degree + 1], dtype=np.float32)
             for i in range(degree+1):
-                A[:,i] = yr_diff**i
+                A[:,i] = (yr_diff**i) / np.math.factorial(i)
 
             return A
 
@@ -691,8 +707,14 @@ class geometry:
                 else:
                     for e in datasetName:
                         dateFlag[self.dateList.index(e)] = True
-                data = ds[dateFlag, box[1]:box[3], box[0]:box[2]]
-                data = np.squeeze(data)
+
+                # read
+                data = ds[dateFlag,
+                          box[1]:box[3],
+                          box[0]:box[2]]
+
+                if any(i == 1 for i in data.shape):
+                    data = np.squeeze(data)
         return data
 ################################# geometry class end ###################################
 
@@ -732,7 +754,7 @@ class ifgramStack:
 
         # time info
         self.date12List = ['{}_{}'.format(i, j) for i, j in zip(self.mDates, self.sDates)]
-        self.tbaseIfgram = np.array([i.days + i.seconds / (24 * 60 * 60) 
+        self.tbaseIfgram = np.array([i.days + i.seconds / (24 * 60 * 60)
                                      for i in (self.sTimes - self.mTimes)],
                                     dtype=np.float32)
 
@@ -873,8 +895,18 @@ class ifgramStack:
             if box is None:
                 box = (0, 0, self.width, self.length)
 
-            data = ds[dateFlag, box[1]:box[3], box[0]:box[2]]
-            data = np.squeeze(data)
+            # read
+            if np.sum(dateFlag) < 50:
+                data = ds[dateFlag,
+                          box[1]:box[3],
+                          box[0]:box[2]]
+            else:
+                data = ds[:,
+                          box[1]:box[3],
+                          box[0]:box[2]][dateFlag]
+
+            if any(i == 1 for i in data.shape):
+                data = np.squeeze(data)
         return data
 
     def spatial_average(self, datasetName='coherence', maskFile=None, box=None, useMedian=False):
@@ -899,7 +931,12 @@ class ifgramStack:
             dset = f[datasetName]
             numIfgram = dset.shape[0]
             dmean = np.zeros((numIfgram), dtype=np.float32)
+
+            prog_bar = ptime.progressBar(maxValue=numIfgram)
             for i in range(numIfgram):
+                prog_bar.update(i+1, suffix='{}/{}'.format(i+1, numIfgram))
+
+                # read
                 data = dset[i, box[1]:box[3], box[0]:box[2]]
                 if maskFile:
                     data[mask == 0] = np.nan
@@ -912,10 +949,7 @@ class ifgramStack:
                     dmean[i] = np.nanmedian(data)
                 else:
                     dmean[i] = np.nanmean(data)
-
-                sys.stdout.write('\rreading interferogram {}/{} ...'.format(i+1, numIfgram))
-                sys.stdout.flush()
-            print('')
+            prog_bar.close()
         return dmean, self.date12List
 
     # Functions considering dropIfgram value
@@ -958,7 +992,7 @@ class ifgramStack:
         self.open(print_msg=False)
         if skip_reference:
             ref_phase = np.zeros(self.get_size(dropIfgram=dropIfgram)[0], np.float32)
-            print('skip checking reference pixel info - This is for SIMULATION ONLY.')
+            print('skip checking reference pixel info - This is for offset and testing ONLY.')
         elif 'REF_Y' not in self.metadata.keys():
             raise ValueError('No REF_X/Y found!\nrun reference_point.py to select reference pixel.')
         else:
@@ -987,53 +1021,78 @@ class ifgramStack:
                 dropIfgramFlag = self.dropIfgram
             num2read = np.sum(dropIfgramFlag)
             idx2read = np.where(dropIfgramFlag)[0]
-            for i in range(num2read):  # Loop to save memory usage
+
+            # Loop to save memory usage
+            prog_bar = ptime.progressBar(maxValue=num2read)
+            for i in range(num2read):
+                prog_bar.update(i+1, suffix='{}/{}'.format(i+1, num2read))
                 data = dset[idx2read[i], :, :]
                 mask[data == 0.] = 0
                 mask[np.isnan(data)] = 0
-                sys.stdout.write('\rreading interferogram {}/{} ...'.format(i+1, num2read))
-                sys.stdout.flush()
-            print('')
+            prog_bar.close()
         return mask
 
-    def temporal_average(self, datasetName='coherence', dropIfgram=True):
+    def temporal_average(self, datasetName='coherence', dropIfgram=True, row_step=-1):
         self.open(print_msg=False)
         if datasetName is None:
             datasetName = 'coherence'
         print('calculate the temporal average of {} in file {} ...'.format(datasetName, self.file))
+
+        # index of pairs to read
+        ifgram_flag = np.ones(self.numIfgram, dtype=np.bool_)
+        if dropIfgram:
+            ifgram_flag = self.dropIfgram
+            if np.all(ifgram_flag == 0.):
+                raise Exception(('ALL interferograms are marked as dropped, '
+                                 'can not calculate temporal average.'))
+
+        # temporal baseline for phase
+        # with unit of years (float64 for very short tbase of UAVSAR data)
         if 'unwrapPhase' in datasetName:
             phase2range = -1 * float(self.metadata['WAVELENGTH']) / (4.0 * np.pi)
-            # temporal baseline in years (float64 for very short tbase of UAVSAR data)
             tbase = np.array(self.tbaseIfgram, dtype=np.float64) / 365.25
+            tbase = tbase[ifgram_flag]
 
         with h5py.File(self.file, 'r') as f:
             dset = f[datasetName]
-            num_ifgram, length, width = dset.shape
-            dmean = np.zeros((length, width), dtype=np.float32)
-            drop_ifgram_flag = np.ones(num_ifgram, dtype=np.bool_)
-            if dropIfgram:
-                drop_ifgram_flag = self.dropIfgram
-                if np.all(drop_ifgram_flag == 0.):
-                    raise Exception(('ALL interferograms are marked as dropped, '
-                                     'can not calculate temporal average.'))
 
-            num2read = np.sum(drop_ifgram_flag)
-            idx2read = np.where(drop_ifgram_flag)[0]
-            for i in range(num2read):
-                idx = idx2read[i]
-                data = dset[idx, :, :]
+            # reference value for phase
+            ref_val = None
+            if ('unwrapPhase' in datasetName
+                   and self.refY is not None and 0 <= self.refY <= self.width
+                   and self.refX is not None and 0 <= self.refX <= self.length):
+                ref_val = dset[ifgram_flag, self.refY, self.refX]
+
+            # get step size and number
+            if row_step == -1:
+                num_step = int(np.ceil(np.sum(ifgram_flag) * self.length * self.width / 2e8))
+                row_step = int(np.ceil(self.length / num_step))
+                row_step = round(row_step, -1 * int(np.floor(np.log10(abs(row_step))))) # round to 1
+            num_step = np.ceil(self.length / row_step).astype(int)
+
+            # calculate lines by lines
+            dmean = np.zeros(dset.shape[1:3], dtype=np.float32)
+            prog_bar = ptime.progressBar(maxValue=num_step)
+            for i in range(num_step):
+                r0 = i * row_step
+                r1 = min(r0 + row_step, self.length)
+                prog_bar.update(i+1, suffix='lines {}/{}'.format(r1, self.length))
+
+                # read
+                data = dset[:, r0:r1, :][ifgram_flag]
+
+                # referencing / normalizing for phase
                 if 'unwrapPhase' in datasetName:
-                    if self.refY:
-                        try:
-                            data -= data[self.refY, self.refX]
-                        except:
-                            pass
-                    data *= (phase2range / tbase[idx])
-                dmean += data
-                sys.stdout.write('\rreading interferogram {}/{} ...'.format(i+1, num2read))
-                sys.stdout.flush()
-            dmean *= 1./np.sum(self.dropIfgram)
-            print('')
+                    # spatial referencing
+                    if ref_val is not None:
+                        data -= np.tile(ref_val.reshape(-1, 1, 1), (1, data.shape[1], data.shape[2]))
+                    # phase to phase velocity
+                    for j in range(data.shape[0]):
+                        data[j,:,:] *= (phase2range / tbase[j])
+
+                # use nanmean to better handle NaN values
+                dmean[r0:r1, :] = np.nanmean(data, axis=0)
+            prog_bar.close()
         return dmean
 
     def get_max_connection_number(self):
@@ -1107,10 +1166,12 @@ class ifgramStack:
     @staticmethod
     def get_design_matrix4timeseries(date12_list, refDate=None):
         """Return design matrix of the input ifgramStack for timeseries estimation
-        Parameters: date12_list : list of string in YYYYMMDD_YYYYMMDD format
-                    refDate : str, date in YYYYMMDD format
-        Returns:    A : 2D array of float32 in size of (num_ifgram, num_date-1)
-                    B : 2D array of float32 in size of (num_ifgram, num_date-1)
+        Parameters: date12_list - list of string in YYYYMMDD_YYYYMMDD format
+                    refDate     - str, date in YYYYMMDD format
+                                  set to None for the 1st date
+                                  set to 'no' to disable reference date
+        Returns:    A - 2D array of float32 in size of (num_ifgram, num_date-1)
+                    B - 2D array of float32 in size of (num_ifgram, num_date-1)
         Examples:   obj = ifgramStack('./inputs/ifgramStack.h5')
                     A, B = obj.get_design_matrix4timeseries(obj.get_date12_list(dropIfgram=True))
                     A = ifgramStack.get_design_matrix4timeseries(date12_list, refDate='20101022')[0]
@@ -1140,13 +1201,19 @@ class ifgramStack:
             B[i, ind1:ind2] = tbase[ind1+1:ind2+1] - tbase[ind1:ind2]
 
         # Remove reference date as it can not be resolved
-        if refDate is None:
-            refDate = date_list[0]
-        if refDate:
-            ind_r = date_list.index(refDate)
-            A = np.hstack((A[:, 0:ind_r], A[:, (ind_r+1):]))
-            B = B[:, :-1]
+        if refDate != 'no':
+            # default refDate
+            if refDate is None:
+                refDate = date_list[0]
+
+            # apply refDate
+            if refDate:
+                ind_r = date_list.index(refDate)
+                A = np.hstack((A[:, 0:ind_r], A[:, (ind_r+1):]))
+                B = B[:, :-1]
+
         return A, B
+
 
     def get_perp_baseline_timeseries(self, dropIfgram=True):
         """Get spatial perpendicular baseline in timeseries from ifgramStack, ignoring dropped ifgrams"""
@@ -1338,7 +1405,14 @@ class HDFEOS:
                 else:
                     for e in datasetName:
                         dateFlag[self.dateList.index(e)] = True
-                data = ds[dateFlag, box[1]:box[3], box[0]:box[2]]
-                data = np.squeeze(data)
+
+                # read
+                data = ds[dateFlag,
+                          box[1]:box[3],
+                          box[0]:box[2]]
+
+                # squeeze/shrink dimension whenever it is possible
+                if any(i == 1 for i in data.shape):
+                    data = np.squeeze(data)
         return data
 ################################# HDF-EOS5 class end ###################################

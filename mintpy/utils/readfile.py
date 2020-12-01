@@ -287,8 +287,11 @@ def read_hdf5_file(fname, datasetName=None, box=None, xstep=1, ystep=1):
 
         # 2D dataset
         if ds.ndim == 2:
-            data = ds[box[1]+int(ystep/2):box[3]:ystep,
-                      box[0]+int(xstep/2):box[2]:xstep]
+            data = ds[box[1]:box[3],
+                      box[0]:box[2]]
+            if xstep * ystep > 1:
+                data = data[int(ystep/2)::ystep,
+                            int(xstep/2)::xstep]
 
         # 3D dataset
         elif ds.ndim == 3:
@@ -304,9 +307,16 @@ def read_hdf5_file(fname, datasetName=None, box=None, xstep=1, ystep=1):
 
             # read data
             data = ds[slice_flag,
-                      box[1]+int(ystep/2):box[3]:ystep,
-                      box[0]+int(xstep/2):box[2]:xstep]
-            data = np.squeeze(data)
+                      box[1]:box[3],
+                      box[0]:box[2]]
+
+            if xstep * ystep > 1:
+                data = data[:,
+                            int(ystep/2)::ystep,
+                            int(xstep/2)::xstep]
+
+            if any(i == 1 for i in data.shape):
+                data = np.squeeze(data)
     return data
 
 
@@ -355,7 +365,7 @@ def read_binary_file(fname, datasetName=None, box=None, xstep=1, ystep=1):
             data_type = dataTypeDict[data_type]
 
         k = atr['FILE_TYPE'].lower().replace('.', '')
-        if k in ['unw']:
+        if k in ['unw', 'cor']:
             band = min(2, num_band)
             if datasetName and datasetName in ['band1','intensity','magnitude']:
                 band = 1
@@ -717,7 +727,7 @@ def read_attribute(fname, datasetName=None, standardize=True, metafile_ext=None)
     else:
         # potential file bases and extensions for metadata file given the data file
         metafile_bases = [fname, os.path.splitext(fname)[0]]
-        metafile_exts = ['.rsc', '.xml', '.aux.xml', '.par', '.hdr', '.vrt']
+        metafile_exts = ['.rsc', '.xml', '.par', '.hdr', '.vrt', '.aux.xml']
 
         # grab all existed metadata files in prefered order/priority defined above
         metafiles = []

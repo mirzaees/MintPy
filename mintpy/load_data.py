@@ -26,11 +26,14 @@ from mintpy import subset
 
 
 #################################################################
+PROCESSOR_LIST = ['isce', 'aria', 'snap', 'gamma', 'roipac']
+
 datasetName2templateKey = {'unwrapPhase'     : 'mintpy.load.unwFile',
                            'coherence'       : 'mintpy.load.corFile',
                            'connectComponent': 'mintpy.load.connCompFile',
                            'wrapPhase'       : 'mintpy.load.intFile',
                            'ionoPhase'       : 'mintpy.load.ionoFile',
+                           'magnitude'       : 'mintpy.load.magFile',
 
                            'azimuthOffset'   : 'mintpy.load.azOffFile',
                            'rangeOffset'     : 'mintpy.load.rgOffFile',
@@ -89,8 +92,7 @@ def create_parser():
 
     parser.add_argument('--project', type=str, dest='PROJECT_NAME',
                         help='project name of dataset for INSARMAPS Web Viewer')
-    parser.add_argument('--processor', type=str, dest='processor',
-                        choices={'isce', 'snap', 'gamma', 'roipac', 'doris', 'gmtsar'},
+    parser.add_argument('--processor', type=str, dest='processor', choices=PROCESSOR_LIST,
                         help='InSAR processor/software of the file', default='isce')
     parser.add_argument('--enforce', '-f', dest='updateMode', action='store_false',
                         help='Disable the update mode, or skip checking dataset already loaded.')
@@ -133,7 +135,14 @@ def cmd_line_parse(iargs=None):
 
 #################################################################
 def read_inps2dict(inps):
-    """Read input Namespace object info into inpsDict"""
+    """Read input Namespace object info into inpsDict
+
+    It grab the following contents into inpsDict
+    1. inps & all template files
+    2. configurations: processor, autoPath, updateMode, compression
+    3. extra metadata: PLATFORM, PROJECT_NAME, 
+    4. translate autoPath
+    """
     # Read input info into inpsDict
     inpsDict = vars(inps)
     inpsDict['PLATFORM'] = None
@@ -248,6 +257,7 @@ def read_subset_box(inpsDict):
             box4geo_lut = ut.coordinate(atrLut).bbox_geo2radar(geo_box)
             print('box to read for geocoded lookup file in y/x: {}'.format(box4geo_lut))
 
+    inpsDict['geocoded'] = geocoded
     inpsDict['box'] = pix_box
     inpsDict['box4geo_lut'] = box4geo_lut
     return inpsDict
@@ -322,6 +332,7 @@ def skip_files_with_inconsistent_size(dsPathDict, pix_box=None, dsName='unwrapPh
 
         dsNames = list(dsPathDict.keys())
         date12_list = [atr['DATE12'] for atr in atr_list]
+        num_drop = 0
         for i in range(len(date12_list)):
             if length_list[i] != common_length or width_list[i] != common_width:
                 date12 = date12_list[i]
@@ -333,10 +344,11 @@ def skip_files_with_inconsistent_size(dsPathDict, pix_box=None, dsName='unwrapPh
                     if len(fnames) > 0:
                         dsPathDict[dsName].remove(fnames[0])
                 msg += '\n\t{}\t({}, {})'.format(date12, length_list[i], width_list[i])
+                num_drop += 1
 
         msg += '\n'+'-'*30
-        msg += '\nSkip loading the interferograms above.'
-        msg += '\nContinue to load the rest interferograms.'
+        msg += '\nSkip loading the above interferograms ({}).'.format(num_drop)
+        msg += '\nContinue to load the rest interferograms ({}).'.format(len(date12_list) - num_drop)
         msg += '\n'+'*'*80+'\n'
         print(msg)
     return dsPathDict
@@ -581,39 +593,98 @@ def prepare_metadata(inpsDict):
 
     elif processor == 'isce':
         from mintpy import prep_isce
+        from mintpy.utils.isce_utils import get_processor
+
         meta_files = sorted(glob.glob(inpsDict['mintpy.load.metaFile']))
         if len(meta_files) < 1:
             warnings.warn('No input metadata file found: {}'.format(inpsDict['mintpy.load.metaFile']))
-        try:
-            # metadata and auxliary data
-            meta_file = meta_files[0]
-            baseline_dir = inpsDict['mintpy.load.baselineDir']
-            geom_dir = os.path.dirname(inpsDict['mintpy.load.demFile'])
 
-            # observation
-            obs_keys = ['mintpy.load.unwFile', 'mintpy.load.azOffFile']
-            obs_keys = [i for i in obs_keys if i in inpsDict.keys()]
-            obs_paths = [inpsDict[key] for key in obs_keys if inpsDict[key].lower() != 'auto']
-            if len(obs_paths) > 0:
-                obs_dir = os.path.dirname(os.path.dirname(obs_paths[0]))
-                obs_file = os.path.basename(obs_paths[0])
+        # metadata and auxliary data
+        meta_file = meta_files[0]
+        baseline_dir = inpsDict['mintpy.load.baselineDir']
+        geom_dir = os.path.dirname(inpsDict['mintpy.load.demFile'])
+
+        # observation
+        obs_keys = ['mintpy.load.unwFile', 'mintpy.load.azOffFile']
+        obs_keys = [i for i in obs_keys if i in inpsDict.keys()]
+        obs_paths = [inpsDict[key] for key in obs_keys if inpsDict[key].lower() != 'auto']
+        if len(obs_paths) > 0:
+            processor = get_processor(meta_file)
+            if processor == 'alosStack':
+                obs_dir = os.path.dirname(obs_paths[0])
             else:
-                obs_dir = None
-                obs_file = None
+                obs_dir = os.path.dirname(os.path.dirname(obs_paths[0]))
+            obs_file = os.path.basename(obs_paths[0])
+        else:
+            obs_dir = None
+            obs_file = None
 
-            # compose list of input arguments
-            iargs = ['-m', meta_file, '-g', geom_dir]
-            if baseline_dir:
-                iargs += ['-b', baseline_dir]
-            if obs_dir is not None:
-                iargs += ['-d', obs_dir, '-f', obs_file]
-            print('prep_isce.py', ' '.join(iargs))
-            
-            # run module
+        # compose list of input arguments
+        iargs = ['-m', meta_file, '-g', geom_dir]
+        if baseline_dir:
+            iargs += ['-b', baseline_dir]
+        if obs_dir is not None:
+            iargs += ['-d', obs_dir, '-f', obs_file]
+
+        # run module
+        print('prep_isce.py', ' '.join(iargs))
+        try:
             prep_isce.main(iargs)
-
         except:
-            pass
+            warnings.warn('prep_isce.py failed. Assuming its result exists and continue...')
+
+    elif processor == 'aria':
+        from mintpy import prep_aria
+
+        ## compose input arguments
+        # use the default template file is exists & input
+        default_temp_files = [fname for fname in inpsDict['template_file'] if fname.endswith('smallbaselineApp.cfg')]
+        if len(default_temp_files) > 0:
+            temp_file = default_temp_files[0]
+        else:
+            temp_file = inpsDict['template_file'][0]
+        iargs = ['--template', temp_file]
+
+        # file name/dir/path
+        ARG2OPT_DICT = {
+            '--stack-dir'           : 'mintpy.load.unwFile',
+            '--unwrap-stack-name'   : 'mintpy.load.unwFile',
+            '--coherence-stack-name': 'mintpy.load.corFile',
+            '--conn-comp-stack-name': 'mintpy.load.connCompFile',
+            '--dem'                 : 'mintpy.load.demFile',
+            '--incidence-angle'     : 'mintpy.load.incAngleFile',
+            '--azimuth-angle'       : 'mintpy.load.azAngleFile',
+            '--water-mask'          : 'mintpy.load.waterMaskFile',
+        }
+
+        for arg_name, opt_name in ARG2OPT_DICT.items():
+            arg_value = inpsDict.get(opt_name, 'auto')
+            if arg_value.lower() not in ['auto', 'no', 'none']:
+                if arg_name.endswith('dir'):
+                    iargs += [arg_name, os.path.dirname(arg_value)]
+                elif arg_name.endswith('name'):
+                    iargs += [arg_name, os.path.basename(arg_value)]
+                else:
+                    iargs += [arg_name, arg_value]
+
+        # configurations
+        if inpsDict['compression']:
+            iargs += ['--compression', inpsDict['compression']]
+        if inpsDict['updateMode']:
+            iargs += ['--update']
+
+        ## run
+        print('prep_aria.py', ' '.join(iargs))
+        try:
+            prep_aria.main(iargs)
+        except:
+            warnings.warn('prep_aria.py failed. Assuming its result exists and continue...')
+
+    else:
+        msg = 'un-recognized InSAR processor: {}'.format(processor)
+        msg += '\nsupported processors: {}'.format(PROCESSOR_LIST)
+        raise ValueError(msg)
+
     return
 
 
@@ -624,7 +695,13 @@ def print_write_setting(inpsDict):
     print('updateMode : {}'.format(updateMode))
     print('compression: {}'.format(comp))
     box = inpsDict['box']
-    boxGeo = inpsDict['box4geo_lut']
+
+    # box for geometry file in geo-coordinates
+    if not inpsDict.get('geocoded', False):
+        boxGeo = inpsDict['box4geo_lut']
+    else:
+        boxGeo = box
+
     return updateMode, comp, box, boxGeo
 
 
@@ -646,7 +723,13 @@ def main(iargs=None):
 
     # read input options
     inpsDict = read_inps2dict(inps)
+
+    # prepare metadata
     prepare_metadata(inpsDict)
+
+    # skip data writing for aria as it is included in prep_aria
+    if inpsDict['processor'] == 'aria':
+        return
 
     inpsDict = read_subset_box(inpsDict)
     extraDict = get_extra_metadata(inpsDict)

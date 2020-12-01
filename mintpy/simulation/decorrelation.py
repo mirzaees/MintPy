@@ -18,17 +18,19 @@ from mintpy.utils import ptime
 
 
 ######################################## Statistics ############################################
-def phase_pdf_ds(L, coherence=None, phi_num=1000, epsilon=1e-3):
+def phase_pdf_ds(L, coherence=None, phi_num=1000, coh_step=0.005):
     """Marginal PDF of interferometric phase for distributed scatterers (DS)
+
     Eq. 66 (Tough et al., 1995) and Eq. 4.2.23 (Hanssen, 2001)
+
     Parameters: L         - int, number of independent looks
                 coherence - 1D np.array for the range of coherence, with value < 1.0 for valid operation
                 phi_num   - int, number of phase sample for the numerical calculation
+                coh_step  - float, incremental step of coherence
     Returns:    pdf       - 2D np.array, phase PDF in size of (phi_num, len(coherence))
                 coherence - 1D np.array for the range of coherence
     Example:
-        epsilon = 1e-4
-        coh = np.linspace(0., 1-epsilon, 1000)
+        coh = np.linspace(0.005, 1.0, 200) - 0.0025
         pdf, coh = phase_pdf_ds(1, coherence=coh)
     """
 
@@ -49,9 +51,11 @@ def phase_pdf_ds(L, coherence=None, phi_num=1000, epsilon=1e-3):
         except ValueError:
             return float('inf')
 
-
+    # default coherence value
     if coherence is None:
-        coherence = np.linspace(0., 1.-epsilon, 1000)
+        coh_num = int(1. / coh_step)
+        coherence = np.linspace(coh_step, 1., num=coh_num) - coh_step / 2.0
+
     coherence = np.array(coherence, np.float64).reshape(1, -1)
     phi = np.linspace(-np.pi, np.pi, phi_num, dtype=np.float64).reshape(-1, 1)
 
@@ -76,10 +80,11 @@ def phase_pdf_ds(L, coherence=None, phi_num=1000, epsilon=1e-3):
 
     pdf = B*C + sumD
     pdf = np.multiply(A, pdf)
-    return pdf, coherence.flatten()
+
+    return pdf, coherence.astype(np.float32).flatten()
 
 
-def phase_variance_ds(L,  coherence=None, epsilon=1e-3):
+def phase_variance_ds(L,  coherence=None, coh_step=0.005):
     """Interferometric phase variance for distributed scatterers (DS)
     Eq. 2.1.2 (Box et al., 2015) and Eq. 4.2.27 (Hanssen, 2001)
     Parameters: L         - int, number of independent looks
@@ -87,14 +92,17 @@ def phase_variance_ds(L,  coherence=None, epsilon=1e-3):
     Returns:    var       - 1D np.array, phase variance in size of (len(coherence)) in radians^2
                 coherence - 1D np.array for the range of coherence
     Example:
-        epsilon = 1e-4
-        coh = np.linspace(0., 1-epsilon, 1000)
+        coh = np.linspace(0.005, 1.0, 200) - 0.0025
         var, coh = phase_variance_ds(1, coherence=coh)
     """
-    if coherence is None:
-        coherence = np.linspace(0., 1.-epsilon, 1000, dtype=np.float64)
-    phi_num = len(coherence)
 
+    # default coherence value
+    if coherence is None:
+        coh_num = int(1. / coh_step)
+        coherence = np.linspace(coh_step, 1., num=coh_num) - coh_step / 2.0
+
+    coherence = np.array(coherence, dtype=np.float64)
+    phi_num = len(coherence)
     phi = np.linspace(-np.pi, np.pi, phi_num, dtype=np.float64).reshape(-1, 1)
     phi_step = 2*np.pi/phi_num
 
@@ -129,8 +137,10 @@ def phase_variance_ps(L, coherence=None, epsilon=1e-3):
 
 
 ########################################## Simulations #########################################
-def calibrate_coherence4phase_pdf_bias(coh, L, coh_step=0.02, num_sample=1e5, print_msg=True):
-    """Calculate coherence for the bias caused by the imperfect phase PDF of DS.
+def calibrate_coherence4phase_pdf_bias(coh, L, coh_step=0.02, num_sample=1e5, print_msg=True,
+                                       poly_deg=None, poly_rcond=1e-5):
+    """Calibrate coherence for the bias caused by the imperfect phase PDF of DS
+    during decorrelation noise simulation.
 
     By comparing the estimated coherence from the simulated decorrelation noise based on its PDF
     with the specified true coherence.
@@ -142,14 +152,18 @@ def calibrate_coherence4phase_pdf_bias(coh, L, coh_step=0.02, num_sample=1e5, pr
                 L          - int, number of independent looks
                 coh_step   - float, step of coherence to generate lookup table
                 num_sample - int, number of samples used for coherence estimation
+                poly_deg   - int, polynomial order degree. Default: 10 for L <=10, 40 for 10 < L <= 20.
+                poly_rcond - float, relative condition number of the fit.
     Returns:    coh_cal    - 1/2/3D np.ndarray of float32 for calibrated coherence
+                ffit       - the polynomial function of this calibration curve
     """
+    if L > 20:
+        raise ValueError('input L ({}) > 20! Polynomial fitting will be poorly conditioned!'.format(L))
 
     ## 1. calculate the bias due to phase PDF numerically
     # list of coherence
     num_coh = int(1 / coh_step)
-    coh_sim = np.linspace(1, coh_step, num=num_coh)
-    coh_sim -= coh_step/2   # use value in the bin center
+    coh_sim = np.linspace(1, coh_step, num=num_coh) - coh_step / 2.0
 
     # loop over different coherence
     coh_est = np.zeros(num_coh, dtype=np.float32)
@@ -158,18 +172,35 @@ def calibrate_coherence4phase_pdf_bias(coh, L, coh_step=0.02, num_sample=1e5, pr
         sim_pha = sample_decorrelation_phase(coh_sim[i], L=L, size=num_sample)
 
         # form interferometric phase
-        sim_int = np.array(np.exp(1j*sim_pha), dtype=np.complex64)
+        sim_int = np.array(np.exp(1j * sim_pha), dtype=np.complex64)
 
         # calc coherence from interferometric phase
         coh_est[i] = np.abs(np.mean(sim_int))
 
-    ## 2. fit a polynomial curve to calibrate the bias
-    if print_msg:
-        print('calibrate the coherence for the phase PDF bias with a polynomial of degree 10')
-    ffit = poly.Polynomial(poly.polyfit(coh_est, coh_sim, deg=10, rcond=1e-15))
-    coh_cal = ffit(coh)
+    # add 1 as the last data point
+    # for better fitting for values close to 1.
+    coh_sim = np.hstack((coh_sim, np.array([1])))
+    coh_est = np.hstack((coh_est, np.array([1])))
 
-    return coh_cal
+    ## 2. fit a polynomial curve to calibrate the bias
+    # default degree of polynomial
+    if poly_deg is None:
+        if L < 10:
+            poly_deg = 10
+        else:
+            poly_deg = 40
+    if print_msg:
+        print('calibrate coherence for the phase PDF bias with a polynomial of degree {}'.format(poly_deg))
+
+    # https://numpy.org/doc/stable/reference/generated/numpy.polynomial.polynomial.polyfit.html
+    ffit = poly.Polynomial(poly.polyfit(coh_est, coh_sim, deg=poly_deg, rcond=poly_rcond, full=True)[0])
+
+    ## 3. apply the calibration
+    coh_cal = ffit(coh)
+    coh_cal[coh_cal < 0] = 0
+    coh_cal[coh_cal > 1] = 1
+
+    return coh_cal, ffit
 
 
 def coherence2decorrelation_phase(coh, L, coh_step=0.01, num_repeat=1, scale=1.0, display=False, print_msg=True):
@@ -281,7 +312,7 @@ def sample_decorrelation_phase(coherence, L, size=1, phi_num=1000, display=False
 
 
 #################################### Weight Functions #####################################
-def coherence2phase_variance(coherence, L=32, scatter='DS', epsilon=1e-3, print_msg=False):
+def coherence2phase_variance(coherence, L=32, scatter='DS', coh_step=0.005, print_msg=False):
     """Convert coherence to phase variance, depending on the type of scatterers
 
     For DS, it is equation (66) from Tough et al. (1995).
@@ -295,17 +326,14 @@ def coherence2phase_variance(coherence, L=32, scatter='DS', epsilon=1e-3, print_
     lineStr = '    number of independent looks L={}'.format(L)
     if L > 80:
         L = 80
-        lineStr += ', use L=80 to avoid dividing by 0 in calculation with negligible effect'
+        lineStr += ', use L=80 to avoid dividing by 0 with negligible effect'
     if print_msg:
         print(lineStr)
 
-    coh_num = 1000
-    coh_min = 0.0 + epsilon
-    coh_max = 1.0 - epsilon
-    coh_lut = np.linspace(coh_min, coh_max, coh_num)
+    coh_num = int(1. / coh_step)
+    coh_lut = np.linspace(coh_step, 1.0, num=coh_num) - coh_step / 2.0
     coh_min = np.min(coh_lut)
     coh_max = np.max(coh_lut)
-    coh_step = (coh_max - coh_min) / (coh_num - 1)
 
     coherence = np.array(coherence)
     coherence[coherence < coh_min] = coh_min
@@ -376,5 +404,6 @@ def coherence2weight(coh_data, weight_func='var', L=20, epsilon=5e-2, print_msg=
     if weight is not None:
         weight = np.array(weight, np.float32)
     del coh_data
+
     return weight
 

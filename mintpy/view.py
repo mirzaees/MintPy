@@ -30,7 +30,13 @@ from mintpy.objects import (
     timeseries,
 )
 from mintpy.objects.gps import GPS
-from mintpy.utils import ptime, readfile, utils as ut, plot as pp
+from mintpy.utils import (
+    arg_group,
+    ptime,
+    readfile,
+    utils as ut,
+    plot as pp,
+)
 from mintpy.multilook import multilook_data
 from mintpy import subset, version
 
@@ -48,6 +54,7 @@ EXAMPLE = """example:
   view.py timeseries.h5 --ex drop_date.txt      #exclude dates to plot
   view.py timeseries.h5 '*2017*'                #all acquisitions in 2017
   view.py timeseries.h5 '*2017*' '*2018*'       #all acquisitions in 2017 and 2018
+  view.py timeseries.h5 20200616_20200908       #reconstruct interferogram on the fly
 
   view.py ifgramStack.h5 coherence
   view.py ifgramStack.h5 unwrapPhase-           #unwrapPhase only in the presence of unwrapPhase_bridging
@@ -105,16 +112,16 @@ def create_parser():
     parser.add_argument('--noverbose', dest='print_msg', action='store_false',
                         help='Disable the verbose message printing (default: %(default)s).')
 
-    parser = pp.add_data_disp_argument(parser)
-    parser = pp.add_dem_argument(parser)
-    parser = pp.add_figure_argument(parser)
-    parser = pp.add_gps_argument(parser)
-    parser = pp.add_mask_argument(parser)
-    parser = pp.add_map_argument(parser)
-    parser = pp.add_point_argument(parser)
-    parser = pp.add_reference_argument(parser)
-    parser = pp.add_save_argument(parser)
-    parser = pp.add_subset_argument(parser)
+    parser = arg_group.add_data_disp_argument(parser)
+    parser = arg_group.add_dem_argument(parser)
+    parser = arg_group.add_figure_argument(parser)
+    parser = arg_group.add_gps_argument(parser)
+    parser = arg_group.add_mask_argument(parser)
+    parser = arg_group.add_map_argument(parser)
+    parser = arg_group.add_point_argument(parser)
+    parser = arg_group.add_reference_argument(parser)
+    parser = arg_group.add_save_argument(parser)
+    parser = arg_group.add_subset_argument(parser)
 
     return parser
 
@@ -301,7 +308,7 @@ def update_inps_with_file_metadata(inps, metadata):
 
     # Map info - coordinate unit and map projection
     # Use cartopy GeoAxes instance if input data is:
-    # 1. geocoded in the unit of degrees AND 
+    # 1. geocoded in the unit of degrees AND
     # 2. displayed in geo-coordinates
     # to support:
     # 1. fancy lat/lon label
@@ -355,11 +362,19 @@ def update_inps_with_file_metadata(inps, metadata):
 def update_data_with_plot_inps(data, metadata, inps):
     # 1. spatial referencing with respect to the seed point
     if inps.ref_yx:   # and inps.ref_yx != [int(metadata['REF_Y']), int(metadata['REF_X'])]:
+        # update ref_y/x to subset
         try:
             ref_y = inps.ref_yx[0] - inps.pix_box[1]
             ref_x = inps.ref_yx[1] - inps.pix_box[0]
         except:
             pass
+
+        # update ref_y/x to multilooking
+        if inps.multilook_num > 1:
+            ref_y = int((ref_y - int(inps.multilook_num / 2)) / inps.multilook_num)
+            ref_x = int((ref_x - int(inps.multilook_num / 2)) / inps.multilook_num)
+
+        # applying spatial referencing
         if len(data.shape) == 2:
             data -= data[ref_y, ref_x]
         elif len(data.shape) == 3:
@@ -444,6 +459,7 @@ def plot_slice(ax, data, metadata, inps=None):
             if inps.coastline:
                 vprint('draw coast line with resolution: {}'.format(inps.coastline))
                 ax.coastlines(resolution=inps.coastline)
+                inps.lalo_label = True
 
             # Plot DEM
             if inps.dem_file:
@@ -627,6 +643,20 @@ def plot_slice(ax, data, metadata, inps=None):
 
         # Status bar
         # extent is (-0.5, -0.5, width-0.5, length-0.5)
+
+        # read lats/lons if exist
+        geom_file = os.path.join(os.path.dirname(metadata['FILE_PATH']), 'inputs/geometryRadar.h5')
+        if os.path.isfile(geom_file):
+            try:
+                lats = readfile.read(geom_file, datasetName='latitude',  box=inps.pix_box)[0]
+                lons = readfile.read(geom_file, datasetName='longitude', box=inps.pix_box)[0]
+            except:
+                msg = 'WARNING: no latitude / longitude found in file: {}'.format(os.path.basename(geom_file))
+                msg += ', skip showing lat/lon in the status bar.'
+                vprint(msg)
+        else:
+            geom_file = None
+
         def format_coord(x, y):
             msg = 'x={:.1f}, y={:.1f}'.format(x, y)
             col = int(np.rint(x - inps.pix_box[0]))
@@ -637,7 +667,9 @@ def plot_slice(ax, data, metadata, inps=None):
                 if inps.dem_file:
                     h = dem[row, col]
                     msg += ', h={:.0f} m'.format(h)
-            #msg += ', v ='
+                # lat/lon
+                if geom_file:
+                    msg += ', lat={:.4f}, lon={:.4f}'.format(lats[row, col], lons[row, col])
             return msg
         ax.format_coord = format_coord
 
@@ -690,7 +722,7 @@ def read_input_file_info(inps):
     if 'DATA_TYPE' in atr.keys():
         msg += ' in {} format'.format(atr['DATA_TYPE'])
 
-    vprint('run {} in {}'.format(os.path.basename(__file__), version.description))
+    vprint('run {} in {}'.format(os.path.basename(__file__), version.release_description))
     vprint(msg)
 
     ## size and name
@@ -749,12 +781,19 @@ def read_dataset_input(inps):
     if len(inps.dset) > 0 or len(inps.dsetNumList) > 0:
         # message
         if len(inps.dset) > 0:
-            print('input dataset: "{}"'.format(inps.dset))
+            vprint('input dataset: "{}"'.format(inps.dset))
 
-        # search
+        # special rule for special file types
         if inps.key == 'velocity':
             inps.search_dset = False
             vprint('turning glob search OFF for {} file'.format(inps.key))
+
+        elif inps.key == 'timeseries' and len(inps.dset) == 1 and '_' in inps.dset[0]:
+            date1, date2 = inps.dset[0].split('_')
+            inps.dset = [date2]
+            inps.ref_date = date1
+
+        # search
         inps.dsetNumList = search_dataset_input(inps.sliceList,
                                                 inps.dset,
                                                 inps.dsetNumList,
@@ -776,6 +815,7 @@ def read_dataset_input(inps):
             inps.dset = [obj.sliceList[0].split('-')[0]]
         else:
             inps.dset = inps.sliceList
+
         inps.dsetNumList = search_dataset_input(inps.sliceList,
                                                 inps.dset,
                                                 inps.dsetNumList,
@@ -795,10 +835,12 @@ def read_dataset_input(inps):
     if inps.ref_date:
         if inps.key not in timeseriesKeyNames:
             inps.ref_date = None
+
         ref_date = search_dataset_input(inps.sliceList,
                                         [inps.ref_date],
                                         [],
                                         inps.search_dset)[0][0]
+
         if not ref_date:
             vprint('WARNING: input reference date is not included in input file!')
             vprint('input reference date: '+inps.ref_date)
@@ -1006,8 +1048,8 @@ def read_data4figure(i_start, i_end, inps, metadata):
         data = np.ma.masked_where(data == 0., data)
 
     # update display min/max
-    if (same_unit4all_subplots 
-            and all(arg not in sys.argv for arg in ['-v', '--vlim'])
+    if (same_unit4all_subplots
+            and all(arg not in sys.argv for arg in ['-v', '--vlim', '--wrap'])
             and not (inps.dsetFamilyList[0].startswith('unwrap') and not inps.file_ref_yx)
             and inps.dsetFamilyList[0] not in ['bperp']):
         data_mli = multilook_data(data, 10, 10)
@@ -1091,7 +1133,7 @@ def plot_subplot4figure(i, inps, ax, data, metadata):
             if num_subplot <= 20:
                 subplot_title = '{}\n{}'.format(i, title_str)
             elif num_subplot <= 50:
-                subplot_title = title_str
+                subplot_title = title_str.replace('_','\n').replace('-','\n')
             else:
                 subplot_title = '{}'.format(i)
 
@@ -1287,7 +1329,8 @@ def prep_slice(cmd, auto_fig=False):
                 atr  : dict, metadata
                 inps : namespace, input argument for plot setup
     Example:
-        fig, ax = plt.subplots(figsize=[4, 3], projection=ccrs.PlateCarree())
+        subplot_kw = dict(projection=ccrs.PlateCarree())
+        fig, ax = plt.subplots(figsize=[4, 3], subplot_kw=subplot_kw)
         geo_box = (-91.670, -0.255, -91.370, -0.515)    # W, N, E, S
         cmd = 'view.py geo_velocity.h5 velocity --mask geo_maskTempCoh.h5 '
         cmd += '--sub-lon {w} {e} --sub-lat {s} {n} '.format(w=geo_box[0], n=geo_box[1], e=geo_box[2], s=geo_box[3])

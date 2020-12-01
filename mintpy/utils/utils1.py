@@ -9,6 +9,7 @@
 
 
 import os
+import re
 import time
 import glob
 import shutil
@@ -28,9 +29,17 @@ def get_center_lat_lon(geom_file, box=None):
 
     col_c = int((box[0] + box[2]) / 2)
     row_c = int((box[1] + box[3]) / 2)
-    box_c = (col_c, row_c, col_c+1, row_c+1)
-    lat_c = float(readfile.read(geom_file, datasetName='latitude', box=box_c)[0])
-    lon_c = float(readfile.read(geom_file, datasetName='longitude', box=box_c)[0])
+    if 'Y_FIRST' in meta.keys():
+        lat0 = float(meta['Y_FIRST'])
+        lon0 = float(meta['X_FIRST'])
+        lat_step = float(meta['Y_STEP'])
+        lon_step = float(meta['X_STEP'])
+        lat_c = lat0 + lat_step * row_c
+        lon_c = lon0 + lon_step * col_c
+    else:
+        box_c = (col_c, row_c, col_c+1, row_c+1)
+        lat_c = float(readfile.read(geom_file, datasetName='latitude', box=box_c)[0])
+        lon_c = float(readfile.read(geom_file, datasetName='longitude', box=box_c)[0])
     return lat_c, lon_c
 
 
@@ -118,7 +127,8 @@ def get_residual_rms(timeseries_resid_file, mask_file='maskTempCoh.h5', ramp_typ
                                            ramp_type=ramp_type,
                                            mask_file=mask_file,
                                            out_file=deramped_file)
-        print('Calculating residual RMS for each epoch from file: '+deramped_file)
+
+        print('\ncalculating residual RMS for each epoch from file: '+deramped_file)
         rms_file = timeseries(deramped_file).timeseries_rms(maskFile=mask_file, outFile=rms_file)
 
     # Read residual RMS text file
@@ -180,21 +190,24 @@ def spatial_average(File, datasetName='coherence', maskFile=None, box=None,
     if not box:
         box = (0, 0, int(atr['WIDTH']), int(atr['LENGTH']))
 
-    # If input is text file
-    suffix = ''
+    # default output filename
     if k == 'ifgramStack':
-        suffix += '_'+datasetName
-    suffix += '_spatialAvg.txt'
+        prefix = datasetName
+    else:
+        prefix = os.path.splitext(os.path.basename(File))[0]
+    suffix = 'SpatialAvg.txt'
+    txtFile = prefix + suffix
+
+    # If input is text file
     if File.endswith(suffix):
         print('Input file is spatial average txt already, read it directly')
         meanList, dateList = read_text_file(File)
         return meanList, dateList
 
     # Read existing txt file only if 1) data file is older AND 2) same AOI
-    txtFile = os.path.splitext(os.path.basename(File))[0]+suffix
     file_line = '# Data file: {}\n'.format(os.path.basename(File))
     mask_line = '# Mask file: {}\n'.format(maskFile)
-    aoi_line = '# AOI box: {}\n'.format(box)
+    aoi_line  = '# AOI box: {}\n'.format(box)
     try:
         # Read AOI line from existing txt file
         fl = open(txtFile, 'r')
@@ -471,7 +484,7 @@ def get_geometry_file(dset_list, work_dir=None, coord='geo', abspath=True, print
     return geom_file
 
 
-def update_template_file(template_file, extra_dict):
+def update_template_file(template_file, extra_dict, delimiter='='):
     """Update option value in template_file with value from input extra_dict"""
     # Compare and skip updating template_file if no new option value found.
     update = False
@@ -487,12 +500,17 @@ def update_template_file(template_file, extra_dict):
     tmp_file = template_file+'.tmp'
     f_tmp = open(tmp_file, 'w')
     for line in open(template_file, 'r'):
-        c = [i.strip() for i in line.strip().split('=', 1)]
+        c = [i.strip() for i in line.strip().split(delimiter, 1)]
         if not line.startswith(('%', '#')) and len(c) > 1:
             key = c[0]
             value = str.replace(c[1], '\n', '').split("#")[0].strip()
             if key in extra_dict.keys() and extra_dict[key] != value:
-                line = line.replace(value, extra_dict[key], 1)
+                # use "= {OLD_VALUE}" for search/replace to be more robust
+                # against the scenario when key name contains {OLD_VALUE}
+                # i.e. mintpy.load.autoPath
+                old_value_str = re.findall(delimiter+'[\s]*'+value, line)[0]
+                new_value_str = old_value_str.replace(value, extra_dict[key])
+                line = line.replace(old_value_str, new_value_str, 1)
                 print('    {}: {} --> {}'.format(key, value, extra_dict[key]))
         f_tmp.write(line)
     f_tmp.close()
@@ -698,6 +716,8 @@ def run_deramp(fname, ramp_type, mask_file=None, out_file=None, datasetName=None
     start_time = time.time()
     atr = readfile.read_attribute(fname)
     k = atr['FILE_TYPE']
+    length = int(atr['LENGTH'])
+    width = int(atr['WIDTH'])
 
     print('remove {} ramp from file: {}'.format(ramp_type, fname))
     if not out_file:
@@ -711,46 +731,27 @@ def run_deramp(fname, ramp_type, mask_file=None, out_file=None, datasetName=None
         mask = readfile.read(mask_file)[0]
         print('read mask file: '+mask_file)
     else:
-        mask = np.ones((int(atr['LENGTH']), int(atr['WIDTH'])))
+        mask = np.ones((length, width), dtype=np.bool_)
         print('use mask of the whole area')
 
     # deramping
     if k == 'timeseries':
-        # initialize dataset structure
-        ts_obj = timeseries(fname)
-        ts_obj.open(print_msg=False)
-        date_list  = ts_obj.dateList
-        num_date   = len(date_list)
-        date_dtype = np.dtype('S{}'.format(len(date_list[0])))
-        dsNameDict = {
-            "date"       : (date_dtype, (num_date,)),
-            "bperp"      : (np.float32, (num_date,)),
-            "timeseries" : (np.float32, (num_date, ts_obj.length, ts_obj.width)),
-        }
-
         # write HDF5 file with defined metadata and (empty) dataset structure
-        writefile.layout_hdf5(out_file, dsNameDict, atr, print_msg=False)
-
-        # write date time-series
-        date_list_utf8 = [dt.encode('utf-8') for dt in date_list]
-        writefile.write_hdf5_block(out_file, date_list_utf8, datasetName='date', print_msg=False)
-
-        # write bperp time-series
-        bperp = ts_obj.pbase
-        writefile.write_hdf5_block(out_file, bperp, datasetName='bperp', print_msg=False)
+        writefile.layout_hdf5(out_file, ref_file=fname, print_msg=True)
 
         print('estimating phase ramp one date at a time ...')
+        date_list = timeseries(fname).get_date_list()
+        num_date = len(date_list)
         prog_bar = ptime.progressBar(maxValue=num_date)
         for i in range(num_date):
             # read
-            dsName = 'timeseries-{}'.format(date_list[i])
-            data = readfile.read(fname, datasetName=dsName)[0]
+            data = readfile.read(fname, datasetName=date_list[i])[0]
             # deramp
             data = deramp(data, mask, ramp_type=ramp_type, metadata=atr)[0]
             # write
             writefile.write_hdf5_block(out_file, data,
                                        datasetName='timeseries',
-                                       block=[i, i+1, 0, ts_obj.length, 0, ts_obj.width],
+                                       block=[i, i+1, 0, length, 0, width],
                                        print_msg=False)
             prog_bar.update(i+1, suffix='{}/{}'.format(i+1, num_date))
         prog_bar.close()
@@ -769,7 +770,7 @@ def run_deramp(fname, ramp_type, mask_file=None, out_file=None, datasetName=None
                 print('access HDF5 dataset /{}'.format(dsNameOut))
             else:
                 dsOut = f.create_dataset(dsNameOut,
-                                         shape=(obj.numIfgram, obj.length, obj.width),
+                                         shape=(obj.numIfgram, length, width),
                                          dtype=np.float32,
                                          chunks=True,
                                          compression=None)

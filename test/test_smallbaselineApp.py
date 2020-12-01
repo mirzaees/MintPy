@@ -26,6 +26,8 @@ URL_LIST = [
     'https://zenodo.org/record/3952953/files/FernandinaSenDT128.tar.xz',
     'https://zenodo.org/record/3952950/files/WellsEnvD2T399.tar.xz',
     'https://zenodo.org/record/3952917/files/KujuAlosAT422F650.tar.xz',
+    'https://zenodo.org/record/4265413/files/SanFranSenDT42.tar.xz',
+    'https://zenodo.org/record/4127335/files/WCapeSenAT29.tar.xz',
 ]
 
 PROJ_NAME_LIST = [os.path.basename(url).split('.tar.xz')[0] for url in URL_LIST]
@@ -144,7 +146,9 @@ def test_dataset(dset_name, test_dir, fresh_start=True, test_pyaps=False):
 
     # open final velocity map if on mac
     if sys.platform.lower().startswith('darwin'):
-        cmd = 'open pic/geo_velocity.png'
+        png_file = [i for i in ['pic/geo_velocity.png', 'pic/velocity.png']
+                    if os.path.isfile(i)][0]
+        cmd = 'open {}'.format(png_file)
         print(cmd)
         subprocess.Popen(cmd, shell=True).wait()
     return

@@ -23,8 +23,7 @@ try:
 except ImportError:
     raise ImportError('Could not import skimage!')
 
-from mintpy.objects import ifgramStack
-from mintpy.objects.conncomp import connectComponent
+from mintpy.objects import ifgramStack, conncomp
 from mintpy.defaults.template import get_template_content
 from mintpy.utils import ptime, readfile, writefile, utils as ut, plot as pp
 from mintpy.utils.solvers import l1regls
@@ -189,8 +188,8 @@ def calc_num_triplet_with_nonzero_integer_ambiguity(ifgram_file, mask_file=None,
     """
 
     # default output file path
+    out_dir = os.path.dirname(os.path.dirname(ifgram_file))
     if out_file is None:
-        out_dir = os.path.dirname(os.path.dirname(ifgram_file))
         if dsName == 'unwrapPhase':
             # skip the default dsName in output filename
             out_file = 'numTriNonzeroIntAmbiguity.h5'
@@ -198,9 +197,35 @@ def calc_num_triplet_with_nonzero_integer_ambiguity(ifgram_file, mask_file=None,
             out_file = 'numTriNonzeroIntAmbiguity4{}.h5'.format(dsName)
         out_file = os.path.join(out_dir, out_file)
 
+    # update mode
     if update_mode and os.path.isfile(out_file):
-        print('output file "{}" already exists, skip re-calculating.'.format(out_file))
-        return out_file
+        print('update mode: ON')
+        print('1) output file "{}" already exists'.format(out_file))
+        flag = 'skip'
+
+        # check modification time
+        with h5py.File(ifgram_file, 'r') as f:
+            ti = float(f[dsName].attrs.get('MODIFICATION_TIME', os.path.getmtime(ifgram_file)))
+        to = os.path.getmtime(out_file)
+        if ti > to:
+            print('2) output file is NOT newer than input dataset')
+            flag = 'run'
+        else:
+            print('2) output file is newer than input dataset')
+
+        # check REF_Y/X
+        key_list = ['REF_Y', 'REF_X']
+        atri = readfile.read_attribute(ifgram_file)
+        atro = readfile.read_attribute(out_file)
+        if not all(atri[i] == atro[i] for i in key_list):
+            print('3) NOT all key configurations are the same: {}'.format(key_list))
+            flag = 'run'
+        else:
+            print('3) all key configurations are the same: {}'.format(key_list))
+
+        print('run or skip: {}.'.format(flag))
+        if flag == 'skip':
+            return out_file
 
     # read ifgramStack file
     stack_obj = ifgramStack(ifgram_file)
@@ -251,9 +276,15 @@ def calc_num_triplet_with_nonzero_integer_ambiguity(ifgram_file, mask_file=None,
 
     # mask
     if mask_file is not None:
-        print('masking with file', mask_file)
         mask = readfile.read(mask_file)[0]
         num_nonzero_closure[mask == 0] = np.nan
+        print('mask out pixels with zero in file:', mask_file)
+
+    coh_file = os.path.join(out_dir, 'avgSpatialCoh.h5')
+    if os.path.isfile(coh_file):
+        coh = readfile.read(coh_file)[0]
+        num_nonzero_closure[coh == 0] = np.nan
+        print('mask out pixels with zero in file:', coh_file)
 
     # write to disk
     print('write to file', out_file)
@@ -401,7 +432,7 @@ def get_common_region_int_ambiguity(ifgram_file, cc_mask_file, water_mask_file=N
         print('refine common mask based on water mask file', water_mask_file)
         cc_mask[water_mask == 0] = 0
 
-    label_img, num_label = connectComponent.get_large_label(cc_mask, min_area=2.5e3, print_msg=True)
+    label_img, num_label = conncomp.label_conn_comp(cc_mask, min_area=2.5e3, print_msg=True)
     common_regions = measure.regionprops(label_img)
     print('number of common regions:', num_label)
 
@@ -513,7 +544,7 @@ def run_unwrap_error_phase_closure(ifgram_file, common_regions, water_mask_file=
             cc = np.squeeze(f[ccName][i, :, :])
             if water_mask is not None:
                 cc[water_mask == 0] = 0
-            cc_obj = connectComponent(conncomp=cc, metadata=stack_obj.metadata)
+            cc_obj = conncomp.connectComponent(conncomp=cc, metadata=stack_obj.metadata)
             cc_obj.label()
             local_regions = measure.regionprops(cc_obj.labelImg)
 
@@ -572,7 +603,7 @@ def main(iargs=None):
         # for debug
         #plot_num_triplet_with_nonzero_integer_ambiguity(out_file)
     m, s = divmod(time.time()-start_time, 60)
-    print('\ntime used: {:02.0f} mins {:02.1f} secs\nDone.'.format(m, s))
+    print('time used: {:02.0f} mins {:02.1f} secs\nDone.'.format(m, s))
     return
 
 

@@ -25,7 +25,7 @@ nav:
     - User Guide:
         - Example datasets: demo_dataset.md
         - Example directory structure: dir_structure.md
-        - Example template files: examples/input_files/README.md
+        - Example template files: https://github.com/insarlab/MintPy/tree/main/mintpy/data/input_files/README.md
         - Parallel processing with Dask: dask.md
         - Tutorials in Jupyter Notebook: https://github.com/insarlab/MintPy-tutorial
         - Frequently Asked Questions: FAQs.md
@@ -35,7 +35,7 @@ nav:
         - QGIS: QGIS.md
     - API Documentation:
         - Attributes: api/attributes.md
-        - Colormaps: resources/colormaps/README.md
+        - Colormaps: api/colormaps.md
         - Coordinates: api/coord.md
         - Data structure: api/data_structure.md
         - Docker: docker.md
